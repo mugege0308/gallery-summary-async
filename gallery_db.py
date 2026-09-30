@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import mimetypes
 import os
 import re
@@ -54,6 +55,9 @@ PREFERENCE_SIGNALS = {
     "rejected": -1.0,
     "unreviewed": 0.0,
 }
+SYNC_SHUTDOWN_TIMEOUT_SECONDS = 5.0
+
+logger = logging.getLogger(__name__)
 
 
 class GalleryError(Exception):
@@ -620,7 +624,17 @@ class GalleryStore:
             # Do not close the SQLite connection while a background scan can
             # still be using it.  Waiting gives shutdown a deterministic
             # task-cleanup boundary.
-            sync_thread.join()
+            sync_thread.join(timeout=SYNC_SHUTDOWN_TIMEOUT_SECONDS)
+            if sync_thread.is_alive():
+                # The scan cannot be interrupted safely while it is using the
+                # connection. Leave the daemon thread and connection alive;
+                # the process can exit without waiting for a full scan, and
+                # the worker will finish against the still-open connection.
+                logger.warning(
+                    "Gallery sync is still running during shutdown; "
+                    "leaving the SQLite connection open for the daemon worker."
+                )
+                return
         with self._lock:
             self.connection.close()
 
@@ -632,6 +646,7 @@ class GalleryStore:
         except Exception as error:  # keep an index-backed response available
             with self._lock:
                 self._last_sync_error = f"{type(error).__name__}: {error}"
+            logger.exception("Background gallery sync failed: %s", error)
         else:
             with self._lock:
                 self._last_sync_error = None

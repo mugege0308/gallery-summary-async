@@ -512,14 +512,23 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("portは1～65535で指定してください。")
     store = GalleryStore(args.images_root, args.db_path)
     try:
-        count = store.sync()
         handler = type(
             "ConfiguredGalleryRequestHandler",
             (GalleryRequestHandler,),
             {"store": store, "web_root": WEB_ROOT},
         )
         server = ThreadingHTTPServer((args.host, args.port), handler)
-        print(f"画像ギャラリーを起動しました（{count}枚）")
+        try:
+            sync_status = store.request_background_sync()
+        except Exception as error:
+            # Binding the HTTP server is the readiness boundary. A failure to
+            # schedule the initial scan must not make /api/config unavailable.
+            print(f"初回同期の開始に失敗しました: {error}", file=sys.stderr)
+            sync_status = store.sync_status()
+        print(
+            "画像ギャラリーを起動しました（"
+            f"現在の索引{sync_status['indexed_count']}枚、初回同期をバックグラウンド実行中）"
+        )
         print(f"このPC: http://127.0.0.1:{args.port}/")
         if args.host == "0.0.0.0":
             print(f"同じLANのスマホ: http://{_local_network_address()}:{args.port}/")
