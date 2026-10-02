@@ -8,6 +8,7 @@ ComfyUIのoutputフォルダなどを --images-root で指定できる。
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import re
@@ -19,6 +20,8 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from gallery_db import GalleryError, GalleryStore, REVIEW_STATUSES, STATUS_LABELS, now_iso
@@ -29,6 +32,32 @@ DEFAULT_IMAGES_ROOT = PROJECT_ROOT / "lora_datasets"
 DEFAULT_DB_PATH = PROJECT_ROOT / ".gallery" / "gallery.sqlite3"
 WEB_ROOT = PROJECT_ROOT / "gallery_web"
 AI_JOB_FILE = PROJECT_ROOT / ".gallery" / "ai_review_job.json"
+DEFAULT_GENERATION_BACKEND_URL = "http://127.0.0.1:8787"
+GENERATION_PROXY_MAX_BODY_BYTES = 64 * 1024
+GENERATION_PROXY_TIMEOUT_SECONDS = 15
+_ABSOLUTE_PATH_RE = re.compile(r"(?:(?:[A-Za-z]:)?[\\/])(?:[^\s,;]+[\\/])+[^\s,;]+")
+_GENERATION_JOB_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+
+class RequestTooLargeError(GalleryError):
+    """A request exceeded the endpoint's explicit body limit."""
+
+
+def _is_loopback_client(address: str) -> bool:
+    try:
+        return ipaddress.ip_address(address).is_loopback
+    except ValueError:
+        return False
+
+
+def _sanitize_proxy_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return _ABSOLUTE_PATH_RE.sub("<path>", value)
+    if isinstance(value, list):
+        return [_sanitize_proxy_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _sanitize_proxy_value(item) for key, item in value.items()}
+    return value
 
 
 def _read_ai_job() -> dict[str, Any]:
@@ -154,6 +183,7 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
     store: GalleryStore
     web_root: Path
     max_body_bytes = 4 * 1024 * 1024
+    generation_max_body_bytes = GENERATION_PROXY_MAX_BODY_BYTES
 
     server_version = "LocalImageGallery/1.0"
 
@@ -188,10 +218,79 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
             raise GalleryError("page_sizeは1～100で指定してください。")
         return page, page_size
 
+    @staticmethod
+    def _generation_backend_url() -> str:
+        configured = os.environ.get("GALLERY_GENERATION_BACKEND_URL", DEFAULT_GENERATION_BACKEND_URL).strip().rstrip("/")
+        parsed = urlsplit(configured)
+        if parsed.scheme != "http" or parsed.username or parsed.password or parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+            raise GalleryError("Generation Backendの接続先設定が不正です。")
+        if not parsed.hostname or not _is_loopback_client(parsed.hostname):
+            raise GalleryError("Generation Backendはloopbackにのみ接続できます。")
+        try:
+            port = parsed.port or 80
+        except ValueError as error:
+            raise GalleryError("Generation Backendのport設定が不正です。") from error
+        if not 1 <= port <= 65_535:
+            raise GalleryError("Generation Backendのport設定が不正です。")
+        return configured
+
+    def _proxy_generation_json(
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        url = f"{self._generation_backend_url()}{path}"
+        data = None
+        headers = {"Accept": "application/json"}
+        if payload is not None:
+            data = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        request = urllib_request.Request(url, data=data, headers=headers, method=method)
+        try:
+            with urllib_request.urlopen(request, timeout=GENERATION_PROXY_TIMEOUT_SECONDS) as response:
+                status = int(response.status)
+                raw = response.read(512 * 1024)
+        except urllib_error.HTTPError as error:
+            try:
+                raw = error.read(128 * 1024)
+                value = json.loads(raw.decode("utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+                value = {"ok": False, "error": "Generation Backendがエラーを返しました。"}
+            if not isinstance(value, dict):
+                value = {"ok": False, "error": "Generation Backendが不正な応答を返しました。"}
+            value = _sanitize_proxy_value(value)
+            return self._send_json(value, status if 400 <= status <= 599 else HTTPStatus.BAD_GATEWAY)
+        except (urllib_error.URLError, TimeoutError, OSError):
+            return self._send_error_json("Generation Backendに接続できません。", HTTPStatus.BAD_GATEWAY)
+        try:
+            value = json.loads(raw.decode("utf-8"))
+        except (UnicodeError, json.JSONDecodeError) as error:
+            return self._send_error_json("Generation Backendの応答を読み取れません。", HTTPStatus.BAD_GATEWAY)
+        if not isinstance(value, dict):
+            return self._send_error_json("Generation Backendの応答が不正です。", HTTPStatus.BAD_GATEWAY)
+        return self._send_json(_sanitize_proxy_value(value), status)
+
+    def _generation_job_path(self, path: str) -> str | None:
+        prefix = "/api/generation/jobs/"
+        if not path.startswith(prefix):
+            return None
+        job_id = unquote(path.removeprefix(prefix))
+        if not _GENERATION_JOB_ID_RE.fullmatch(job_id):
+            return None
+        return f"{prefix}{job_id}"
+
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         parsed = urlsplit(self.path)
         path = parsed.path
         try:
+            if path == "/api/generation/health":
+                return self._proxy_generation_json("GET", path)
+            if path == "/api/generation/options":
+                return self._proxy_generation_json("GET", path)
+            generation_job_path = self._generation_job_path(path)
+            if generation_job_path is not None:
+                return self._proxy_generation_json("GET", generation_job_path)
             if path == "/" or path == "/index.html":
                 return self._serve_index()
             if path.startswith("/static/"):
@@ -370,14 +469,15 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
         )
         self._send_bytes(html.encode("utf-8"), "text/html; charset=utf-8")
 
-    def _request_json(self) -> dict[str, Any]:
+    def _request_json(self, *, max_body_bytes: int | None = None) -> dict[str, Any]:
+        body_limit = self.max_body_bytes if max_body_bytes is None else max_body_bytes
         raw_length = self.headers.get("Content-Length")
         try:
             length = int(raw_length or "0")
         except ValueError as error:
             raise GalleryError("Content-Lengthが不正です。") from error
-        if length < 0 or length > self.max_body_bytes:
-            raise GalleryError("リクエストが大きすぎます。")
+        if length < 0 or length > body_limit:
+            raise RequestTooLargeError("リクエストが大きすぎます。")
         try:
             value = json.loads(self.rfile.read(length).decode("utf-8"))
         except (UnicodeError, json.JSONDecodeError) as error:
@@ -389,6 +489,14 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         path = urlsplit(self.path).path
         try:
+            if path == "/api/generation/jobs":
+                if not _is_loopback_client(self.client_address[0]):
+                    return self._send_error_json("この端末からは生成を実行できません。", HTTPStatus.FORBIDDEN)
+                content_type = self.headers.get("Content-Type", "").casefold()
+                if not content_type.startswith("application/json"):
+                    return self._send_error_json("Content-Type: application/json が必要です。", HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+                payload = self._request_json(max_body_bytes=self.generation_max_body_bytes)
+                return self._proxy_generation_json("POST", path, payload)
             if path == "/api/ai/review":
                 payload = self._request_json()
                 self.store.sync()
@@ -429,6 +537,8 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
                 self.store.sync(force=True)
                 return self._send_json({"ok": True})
             return self._send_error_json("エンドポイントが見つかりません。", HTTPStatus.NOT_FOUND)
+        except RequestTooLargeError as error:
+            self._send_error_json(str(error), HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
         except GalleryError as error:
             self._send_error_json(str(error))
         except (OSError, ValueError) as error:

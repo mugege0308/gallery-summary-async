@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>画像ギャラリー</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">LOCAL IMAGE REVIEW</p>
+      <h1>生成画像ギャラリー</h1>
+    </div>
+    <div class="top-actions">
+      <span id="root-label" class="root-label"></span>
+      <button id="refresh" class="button secondary" type="button">更新</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="filters panel" aria-label="絞り込み">
+      <label>状態
+        <select id="status-filter">
+          <option value="">すべて</option>
+          <option value="unreviewed">未選別</option>
+          <option value="adopted">採用</option>
+          <option value="hold">保留</option>
+          <option value="rejected">没</option>
+        </select>
+      </label>
+      <label>キャラクター / データセット
+        <input id="character-filter" type="search" placeholder="例: メルル">
+      </label>
+      <label>データセット名
+        <input id="dataset-filter" type="search" placeholder="例: メルル4">
+      </label>
+      <label>job_id
+        <input id="job-filter" type="search" placeholder="今回の生成jobだけ表示">
+      </label>
+      <label>キーワード
+        <input id="query-filter" type="search" placeholder="ファイル名・prompt・seed…">
+      </label>
+      <label>生成日（開始）
+        <input id="date-from" type="date">
+      </label>
+      <label>生成日（終了）
+        <input id="date-to" type="date">
+      </label>
+      <label>並び順
+        <select id="sort-filter">
+          <option value="recent">生成日時順</option>
+          <option value="ai">AIおすすめ順</option>
+          <option value="quality">品質順</option>
+          <option value="character">キャラ一致順</option>
+          <option value="duplicate">類似が少ない順</option>
+        </select>
+      </label>
+      <label class="check-label">
+        <input id="exclude-similar" type="checkbox">
+        類似画像を除外
+      </label>
+      <label class="check-label">
+        <input id="lora-filter" type="checkbox">
+        LoRA候補のみ
+      </label>
+    </section>
+
+    <section id="generation-panel" class="generation-panel panel" aria-labelledby="generation-title">
+      <div class="generation-head">
+        <div>
+          <h2 id="generation-title">画像を生成</h2>
+          <p class="generation-note">このPCからの1枚生成をGeneration Backendへ依頼します。画像は既存の同期処理でGalleryへ反映されます。</p>
+        </div>
+        <span id="generation-capability" class="generation-capability" role="status">接続確認中…</span>
+      </div>
+      <div class="generation-grid">
+        <label>キャラクタープリセット
+          <select id="generation-character-preset"><option value="">なし</option></select>
+        </label>
+        <label>明示タグ（カンマ区切り）
+          <textarea id="generation-explicit-tags" rows="2" placeholder="portrait, upper body"></textarea>
+        </label>
+        <label>Appearance
+          <textarea id="generation-appearance" rows="2" placeholder="銀髪のボブ、青い目"></textarea>
+        </label>
+        <label>Request
+          <textarea id="generation-request" rows="2" placeholder="白背景、少し微笑む"></textarea>
+        </label>
+        <label>Model
+          <select id="generation-model"></select>
+        </label>
+        <label>Rating
+          <select id="generation-rating"></select>
+        </label>
+        <label>Size
+          <select id="generation-size"></select>
+        </label>
+        <label>Seed（空欄は自動）
+          <input id="generation-seed" type="number" step="1" value="-1">
+        </label>
+        <label>Character LoRA
+          <select id="generation-character-lora"><option value="">なし</option></select>
+        </label>
+        <label>Strength
+          <input id="generation-character-strength" type="number" min="0" max="1" step="0.05" value="0.5">
+        </label>
+        <label>Style LoRA
+          <select id="generation-style-lora"><option value="">なし</option></select>
+        </label>
+        <label>Strength
+          <input id="generation-style-strength" type="number" min="0" max="1" step="0.05" value="0.5">
+        </label>
+        <label>Additional LoRA
+          <select id="generation-additional-lora"><option value="">なし</option></select>
+        </label>
+        <label>Strength
+          <input id="generation-additional-strength" type="number" min="0" max="1" step="0.05" value="0.5">
+        </label>
+        <label>枚数
+          <input type="number" value="1" readonly aria-readonly="true">
+        </label>
+      </div>
+      <div class="generation-actions">
+        <button id="generation-submit" class="button primary" type="button">生成する</button>
+        <span id="generation-status" class="generation-status" role="status">未実行</span>
+      </div>
+    </section>
+
+    <section id="job-summary" class="job-summary panel" hidden aria-live="polite">
+      <strong id="job-summary-title">今回の生成</strong>
+      <span><b id="job-summary-total">0</b>枚</span>
+      <span>batch <b id="job-summary-batches">0</b></span>
+      <span>AI評価済み <b id="job-summary-scored">0</b>枚</span>
+      <span class="candidate-adopt">採用候補 <b id="job-summary-adopt">0</b></span>
+      <span class="candidate-hold">保留候補 <b id="job-summary-hold">0</b></span>
+      <span class="candidate-reject">没候補 <b id="job-summary-reject">0</b></span>
+    </section>
+
+    <section id="dispersion-panel" class="dispersion-panel panel" aria-labelledby="dispersion-title">
+      <div class="dispersion-head">
+        <div>
+          <h2 id="dispersion-title">データセット分散チェック</h2>
+          <p id="dispersion-scope" class="dispersion-scope">採用画像を対象に、prompt / caption / metadataから分類します。</p>
+        </div>
+        <div class="dispersion-actions">
+          <label>対象状態
+            <select id="dispersion-status">
+              <option value="adopted" selected>採用</option>
+              <option value="">すべて</option>
+              <option value="hold">保留</option>
+              <option value="rejected">没</option>
+              <option value="unreviewed">未選別</option>
+            </select>
+          </label>
+          <button id="dispersion-refresh" class="button secondary" type="button">分布を更新</button>
+        </div>
+      </div>
+      <div id="dispersion-active" class="dispersion-active" hidden>
+        <span id="dispersion-active-text"></span>
+        <button id="dispersion-clear" class="button secondary" type="button">分類フィルタを解除</button>
+      </div>
+      <div id="dispersion-warnings" class="dispersion-warnings" aria-live="polite"></div>
+      <div id="dispersion-grid" class="dispersion-grid">
+        <p class="dispersion-empty">分布を読み込み中…</p>
+      </div>
+    </section>
+
+    <section class="reviewbar panel">
+      <div>
+        <strong id="result-count">全0件中 0〜0件を表示</strong>
+        <strong id="selection-count" class="selection-summary">選択中 0枚</strong>
+        <span id="pending-count" class="pending-note"></span>
+      </div>
+      <div class="review-actions">
+        <span class="action-label">選択画像を:</span>
+        <button id="select-page" class="button secondary selection-control" type="button">このページの50枚をすべて選択</button>
+        <button id="clear-page-selection" class="button secondary selection-control" type="button">このページの選択を解除</button>
+        <button class="button status-button adopted" data-set-status="adopted" type="button">採用</button>
+        <button class="button status-button hold" data-set-status="hold" type="button">保留</button>
+        <button class="button status-button rejected" data-set-status="rejected" type="button">没</button>
+        <button class="button status-button candidate" data-set-lora="true" type="button">LoRA候補にする</button>
+        <button class="button status-button candidate-off" data-set-lora="false" type="button">LoRA候補を解除</button>
+        <button id="clear-pending" class="button secondary" type="button">指定を取り消す</button>
+        <button id="commit" class="button primary" type="button" disabled>確定</button>
+      </div>
+      <div class="selection-tools" aria-label="一括選択">
+        <strong>一括選択</strong>
+        <button id="select-results" class="button secondary" type="button">検索結果をすべて選択</button>
+        <button id="clear-results-selection" class="button secondary" type="button">検索結果の選択を解除</button>
+        <span id="range-anchor" class="range-anchor">範囲の始点: 未設定</span>
+      </div>
+      <div class="ai-actions">
+        <strong>AI自動選別</strong>
+        <input id="ai-reference" type="search" placeholder="参照キャラ名（任意）">
+        <button id="ai-review" class="button secondary" type="button">AI評価を開始</button>
+        <input id="reference-name" type="search" placeholder="選択画像を参照キャラとして登録">
+        <button id="register-reference" class="button secondary" type="button">参照登録</button>
+        <span id="ai-status" class="ai-status" role="status">AI評価未実行</span>
+      </div>
+    </section>
+
+    <p id="message" class="message" role="status"></p>
+    <nav id="pagination-top" class="pagination pagination-top panel" aria-label="画像一覧ページ（上部）">
+      <span class="pagination-summary" data-page-range>全0件中 0〜0件を表示</span>
+      <div class="pagination-controls">
+        <button class="button secondary" data-page-change="-1" type="button">前へ</button>
+        <span class="page-number" data-page-info>ページ 1 / 1</span>
+        <button class="button secondary" data-page-change="1" type="button">次へ</button>
+      </div>
+    </nav>
+    <section id="gallery" class="gallery" aria-live="polite"></section>
+    <nav id="pagination" class="pagination pagination-bottom panel" aria-label="画像一覧ページ（下部）">
+      <span class="pagination-summary" data-page-range>全0件中 0〜0件を表示</span>
+      <div class="pagination-controls">
+        <button class="button secondary" data-page-change="-1" type="button">前へ</button>
+        <span class="page-number" data-page-info>ページ 1 / 1</span>
+        <button class="button secondary" data-page-change="1" type="button">次へ</button>
+      </div>
+    </nav>
+    <div id="empty" class="empty panel" hidden>
+      <p>条件に一致する画像がありません。</p>
+      <button id="clear-filters" class="button secondary" type="button">絞り込みを解除</button>
+    </div>
+  </main>
+
+  <dialog id="detail-dialog" class="detail-dialog">
+    <div class="detail-head">
+      <h2 id="detail-title">画像詳細</h2>
+      <button id="close-detail" class="close-button" type="button" aria-label="閉じる">×</button>
+    </div>
+    <div class="detail-body">
+      <div class="detail-image-wrap"><img id="detail-image" alt=""></div>
+      <dl class="metadata-list">
+        <div><dt>状態</dt><dd id="detail-status"></dd></div>
+        <div><dt>LoRA候補</dt><dd id="detail-lora-candidate"></dd></div>
+        <div><dt>ファイル</dt><dd id="detail-file"></dd></div>
+        <div><dt>キャラクター</dt><dd id="detail-character"></dd></div>
+        <div><dt>生成日時</dt><dd id="detail-generated"></dd></div>
+        <div><dt>batch_id</dt><dd id="detail-batch"></dd></div>
+        <div><dt>job_id</dt><dd id="detail-job"></dd></div>
+        <div><dt>元画像</dt><dd id="detail-original"></dd></div>
+        <div><dt>seed</dt><dd id="detail-seed"></dd></div>
+        <div><dt>checkpoint / model</dt><dd id="detail-model"></dd></div>
+        <div><dt>LoRA</dt><dd id="detail-loras"></dd></div>
+        <div><dt>LoRA強度</dt><dd id="detail-lora-strength"></dd></div>
+        <div class="wide"><dt>AI評価</dt><dd id="detail-ai" class="pre-wrap"></dd></div>
+        <div class="wide"><dt>prompt</dt><dd id="detail-prompt" class="pre-wrap"></dd></div>
+        <div class="wide"><dt>negative prompt</dt><dd id="detail-negative" class="pre-wrap"></dd></div>
+        <div class="wide"><dt>caption</dt><dd id="detail-caption" class="pre-wrap"></dd></div>
+      </dl>
+      <div class="detail-selection-tools" aria-label="画像単位の一括選択">
+        <strong>この画像を基準に選択</strong>
+        <span id="detail-match-info" class="match-info">件数を確認中…</span>
+        <div class="detail-selection-buttons">
+          <button id="detail-set-anchor" class="button secondary" type="button">この画像を範囲の始点にする</button>
+          <button id="detail-select-range" class="button secondary" type="button">この画像まで選択</button>
+          <button id="detail-select-prompt" class="button secondary" type="button">同じpromptをすべて選択</button>
+          <button id="detail-select-group" class="button secondary" type="button">同じ生成グループをすべて選択</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="/static/generation_poll_guard.js" defer></script>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
