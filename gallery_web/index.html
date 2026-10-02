@@ -70,13 +70,16 @@
       <div class="generation-head">
         <div>
           <h2 id="generation-title">画像を生成</h2>
-          <p class="generation-note">このPCからの1枚生成をGeneration Backendへ依頼します。画像は既存の同期処理でGalleryへ反映されます。</p>
+          <p class="generation-note">このPCから最大4枚の生成をGeneration Backendへ依頼します。画像は既存の同期処理でGalleryへ反映されます。</p>
         </div>
         <span id="generation-capability" class="generation-capability" role="status">接続確認中…</span>
       </div>
       <div class="generation-grid">
         <label>キャラクタープリセット
           <select id="generation-character-preset"><option value="">なし</option></select>
+        </label>
+        <label>Character / Subject
+          <input id="generation-freeform-character" type="text" placeholder="かわいい女の子">
         </label>
         <label>明示タグ（カンマ区切り）
           <textarea id="generation-explicit-tags" rows="2" placeholder="portrait, upper body"></textarea>
@@ -118,7 +121,18 @@
           <input id="generation-additional-strength" type="number" min="0" max="1" step="0.05" value="0.5">
         </label>
         <label>枚数
-          <input type="number" value="1" readonly aria-readonly="true">
+          <select id="generation-count">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+          </select>
+        </label>
+        <label>Variation
+          <select id="generation-variation">
+            <option value="off">Off</option>
+            <option value="auto">Auto</option>
+          </select>
         </label>
       </div>
       <div class="generation-actions">

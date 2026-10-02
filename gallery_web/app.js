@@ -124,7 +124,7 @@
     if (!Number.isInteger(seed) || seed < -1) throw new Error("Seedは-1または0以上の整数で指定してください。");
     return {
       character_preset: $("#generation-character-preset").value || null,
-      freeform_character: null,
+      freeform_character: $("#generation-freeform-character").value.trim() || null,
       explicit_tags: generationTags($("#generation-explicit-tags").value),
       appearance_text: $("#generation-appearance").value.trim() || null,
       request_text: $("#generation-request").value.trim() || null,
@@ -132,9 +132,17 @@
       rating: $("#generation-rating").value,
       loras: generationLoras(),
       size: $("#generation-size").value,
-      count: 1,
+      count: Number($("#generation-count").value || 1),
+      variation: $("#generation-variation").value || "off",
       seed,
     };
+  }
+
+  function updateGenerationVariationState() {
+    const count = Number($("#generation-count").value || 1);
+    const variation = $("#generation-variation");
+    variation.disabled = count <= 1;
+    if (count <= 1) variation.value = "off";
   }
 
   function stopGenerationPolling() {
@@ -169,7 +177,10 @@
       if (!response.ok || data.ok === false) throw new Error(data.error || "生成状態を取得できません。");
       const progress = data.progress == null ? "" : ` / ${Math.round(Number(data.progress) * 100)}%`;
       const stage = data.stage ? ` / ${data.stage}` : "";
-      setGenerationStatus(`${data.state || "unknown"}${progress}${stage} / job_id=${jobId}`);
+      const counts = data.total_count > 1
+        ? ` / ${data.completed_count || 0}/${data.total_count}完了${data.failed_count ? ` / 失敗${data.failed_count}` : ""}`
+        : "";
+      setGenerationStatus(`${data.state || "unknown"}${progress}${stage}${counts} / job_id=${jobId}`);
       if (data.state === "completed") {
         stopGenerationPolling();
         state.generation.submitting = false;
@@ -895,6 +906,8 @@
   document.addEventListener("DOMContentLoaded", () => {
     $("#refresh").addEventListener("click", () => load({ page: state.page }));
     $("#generation-submit").addEventListener("click", submitGeneration);
+    $("#generation-count").addEventListener("change", updateGenerationVariationState);
+    updateGenerationVariationState();
     for (const type of ["character", "style", "additional"]) {
       $(`#generation-${type}-lora`).addEventListener("change", () => updateGenerationLoraDefault(type));
     }
