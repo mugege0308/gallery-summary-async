@@ -13,6 +13,26 @@ $PidFile = Join-Path $PidDirectory "gallery_server.pid.json"
 $AccessInfoFile = Join-Path $PidDirectory "access_urls.txt"
 $ImagesRootFile = Join-Path $PidDirectory "images_root.txt"
 $MutexName = "Local\CodexLocalImageGalleryLauncher"
+$GallerySecretEnvironmentNames = @(
+    "GALLERY_GENERATION_AUTH_TOKEN",
+    "GALLERY_GENERATION_SESSION_SECRET"
+)
+
+function Import-GallerySecretEnvironment {
+    foreach ($name in $GallerySecretEnvironmentNames) {
+        $processValue = [Environment]::GetEnvironmentVariable($name, "Process")
+        if (-not [string]::IsNullOrWhiteSpace($processValue)) {
+            continue
+        }
+
+        $userValue = [Environment]::GetEnvironmentVariable($name, "User")
+        if (-not [string]::IsNullOrWhiteSpace($userValue)) {
+            # Start-Process inherits this launcher environment.  Never log or
+            # pass the secret as a command-line argument.
+            [Environment]::SetEnvironmentVariable($name, $userValue, "Process")
+        }
+    }
+}
 
 function Test-GalleryReady {
     try {
@@ -145,6 +165,8 @@ try {
         $pythonCommand = Get-Command python.exe -ErrorAction Stop
         $python = $pythonCommand.Source
     }
+
+    Import-GallerySecretEnvironment
 
     New-Item -ItemType Directory -Force -Path $PidDirectory | Out-Null
     $argumentList = @(
