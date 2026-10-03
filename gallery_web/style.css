@@ -261,6 +261,11 @@ dd { margin: 2px 0 0; overflow-wrap: anywhere; }
 .match-info { color: var(--muted); font-size: 13px; }
 .detail-selection-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
 .detail-selection-buttons .button { flex: 1 1 220px; }
+.detail-reference-tools { grid-column: 1 / -1; display: grid; gap: 8px; padding-top: 14px; border-top: 1px solid var(--line); }
+.detail-reference-tools strong { font-size: 14px; }
+.detail-reference-help { color: var(--muted); font-size: 12px; }
+.detail-reference-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.detail-reference-buttons .button { flex: 1 1 220px; min-height: 42px; }
 
 @media (max-width: 900px) {
   .generation-grid { grid-template-columns: repeat(2, minmax(150px, 1fr)); }

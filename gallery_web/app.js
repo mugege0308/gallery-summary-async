@@ -27,7 +27,7 @@
       submitting: false,
       lastRequest: null,
       lastOutput: null,
-      reference: { imageId: "", fileName: "", previewUrl: "" },
+      reference: { imageId: "", fileName: "", previewUrl: "", source: "" },
       tracking: GenerationPollGuard.create(),
       auth: {
         required: false,
@@ -420,7 +420,8 @@
     if (!selection || !preview || !text) return;
     const reference = state.generation.reference;
     selection.hidden = !reference.fileName;
-    text.textContent = reference.fileName ? `Reference image selected: ${reference.fileName}` : "";
+    const label = reference.source === "gallery" ? "Gallery image selected" : "Reference image selected";
+    text.textContent = reference.fileName ? `${label}: ${reference.fileName}` : "";
     if (reference.previewUrl) {
       preview.src = reference.previewUrl;
       preview.hidden = false;
@@ -432,8 +433,8 @@
 
   function clearGenerationReferenceSelection() {
     const reference = state.generation.reference;
-    if (reference.previewUrl && typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(reference.previewUrl);
-    state.generation.reference = { imageId: "", fileName: "", previewUrl: "" };
+    if (reference.previewUrl?.startsWith("blob:") && typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(reference.previewUrl);
+    state.generation.reference = { imageId: "", fileName: "", previewUrl: "", source: "" };
     const fileInput = $("#generation-reference-file");
     if (fileInput) fileInput.value = "";
     renderGenerationReferenceSelection();
@@ -443,14 +444,49 @@
   function handleGenerationReferenceFileChange() {
     const file = $("#generation-reference-file")?.files?.[0];
     const previousUrl = state.generation.reference.previewUrl;
-    if (previousUrl && typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(previousUrl);
+    if (previousUrl?.startsWith("blob:") && typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(previousUrl);
     state.generation.reference = {
       imageId: "",
       fileName: file?.name || "",
       previewUrl: file && typeof URL.createObjectURL === "function" ? URL.createObjectURL(file) : "",
+      source: "upload",
     };
     renderGenerationReferenceSelection();
     renderGenerationRequestSummary();
+  }
+
+  async function useDetailImageAsReference(mode) {
+    const imageId = state.detailImageId;
+    if (!imageId || !["composition", "pose"].includes(mode)) return;
+    const button = $(`#detail-use-${mode}-reference`);
+    if (button) button.disabled = true;
+    try {
+      const response = await fetch("/api/generation/references/from-gallery", {
+        method: "POST",
+        headers: generationMutationHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ gallery_image_id: imageId }),
+      });
+      const data = await response.json();
+      if (!response.ok || data.ok === false || !data.reference_image_id) {
+        throw new Error(data.error || "Gallery画像をReferenceに登録できません。");
+      }
+      const image = state.images.find((item) => item.id === imageId);
+      $("#generation-reference-mode").value = mode;
+      state.generation.reference = {
+        imageId: data.reference_image_id,
+        fileName: data.filename || image?.filename || "Gallery image",
+        previewUrl: image?.thumbnail_url || image?.url || "",
+        source: "gallery",
+      };
+      updateGenerationReferenceState();
+      $("#generation-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      $("#detail-dialog")?.close();
+      setMessage(`${mode === "pose" ? "Pose" : "Composition"} Referenceに設定しました。`);
+    } catch (error) {
+      setMessage(error.message || String(error), true);
+    } finally {
+      if (button) button.disabled = false;
+    }
   }
 
   function updateGenerationReferenceState() {
@@ -483,6 +519,9 @@
   async function uploadGenerationReference() {
     const mode = generationReferenceMode();
     if (mode === "none") return null;
+    if (state.generation.reference.source === "gallery" && state.generation.reference.imageId) {
+      return state.generation.reference.imageId;
+    }
     const file = $("#generation-reference-file").files[0];
     if (!file) throw new Error("Reference modeを使う場合は画像を1枚選択してください。");
     const allowed = new Set(["image/png", "image/jpeg", "image/webp"]);
@@ -1410,6 +1449,8 @@
     });
     $("#detail-select-prompt").addEventListener("click", () => selectDetailMatch("prompt"));
     $("#detail-select-group").addEventListener("click", () => selectDetailMatch("group"));
+    $("#detail-use-composition-reference").addEventListener("click", () => useDetailImageAsReference("composition"));
+    $("#detail-use-pose-reference").addEventListener("click", () => useDetailImageAsReference("pose"));
     $("#detail-dialog").addEventListener("click", (event) => {
       if (event.target === $("#detail-dialog")) $("#detail-dialog").close();
     });

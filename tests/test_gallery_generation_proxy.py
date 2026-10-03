@@ -161,6 +161,60 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertEqual("asset-123", value["reference_image_id"])
         self.assertTrue(FakeGenerationBackendHandler.last_payload["multipart"])
 
+    def test_gallery_image_id_is_resolved_server_side_to_reference_asset(self) -> None:
+        image_id = "a" * 32
+        image_path = Path(self.temporary.name) / "gallery-source.png"
+        image_path.write_bytes(b"fake-gallery-image")
+
+        class GalleryImageStore:
+            def resolve_image(self, requested_id):
+                if requested_id != image_id:
+                    return None
+                return image_path, "image/png"
+
+        self.handler_class.store = GalleryImageStore()
+        status, value = self.request(
+            "POST",
+            "/api/generation/references/from-gallery",
+            {"gallery_image_id": image_id},
+        )
+        self.assertEqual(status, 201)
+        self.assertEqual("asset-123", value["reference_image_id"])
+        self.assertEqual("gallery-source.png", value["filename"])
+        self.assertEqual("gallery", value["source"])
+        self.assertNotIn(self.temporary.name, json.dumps(value))
+        self.assertTrue(FakeGenerationBackendHandler.last_payload["multipart"])
+
+    def test_gallery_reference_rejects_invalid_or_unknown_ids(self) -> None:
+        class EmptyGalleryImageStore:
+            def resolve_image(self, _requested_id):
+                return None
+
+        self.handler_class.store = EmptyGalleryImageStore()
+        status, value = self.request(
+            "POST",
+            "/api/generation/references/from-gallery",
+            {"gallery_image_id": "../private.png"},
+        )
+        self.assertEqual(status, 400)
+        self.assertNotIn("private.png", value.get("error", ""))
+        status, value = self.request(
+            "POST",
+            "/api/generation/references/from-gallery",
+            {"gallery_image_id": "b" * 32},
+        )
+        self.assertEqual(status, 404)
+
+    def test_gallery_reference_requires_remote_auth(self) -> None:
+        with patch.object(gallery_server, "_client_network", return_value="tailscale"):
+            status, value = self.request(
+                "POST",
+                "/api/generation/references/from-gallery",
+                {"gallery_image_id": "a" * 32},
+            )
+        self.assertEqual(status, 401)
+        self.assertIn("認証", value["error"])
+
     def test_job_status_proxy(self) -> None:
         status, value = self.request("GET", "/api/generation/jobs/job-1")
         self.assertEqual(status, 200)
@@ -474,6 +528,8 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn('id="generation-reference-help"', html)
         self.assertIn('id="generation-reference-selection"', html)
         self.assertIn('id="generation-reference-clear"', html)
+        self.assertIn('id="detail-use-composition-reference"', html)
+        self.assertIn('id="detail-use-pose-reference"', html)
         self.assertIn('id="generation-reference-strength"', html)
         self.assertIn('id="generation-reference-fit"', html)
         self.assertIn('id="generation-request-summary"', html)
@@ -486,6 +542,7 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn('id="generation-auth-submit"', html)
         self.assertIn('/api/generation/jobs', app)
         self.assertIn('/api/generation/references', app)
+        self.assertIn('/api/generation/references/from-gallery', app)
         self.assertIn('/api/generation/auth/session', app)
         self.assertIn('/api/generation/auth/logout', app)
         self.assertIn('/api/generation/auth/status', app)
@@ -507,7 +564,11 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn('navigator.clipboard', app)
         self.assertIn('generationResultUrl', app)
         self.assertIn('clearGenerationReferenceSelection', app)
-        self.assertIn('Reference image selected:', app)
+        self.assertIn('useDetailImageAsReference', app)
+        self.assertIn('gallery_image_id: imageId', app)
+        self.assertIn('state.generation.reference.source === "gallery"', app)
+        self.assertIn('Reference image selected', app)
+        self.assertIn('Gallery image selected', app)
         self.assertIn('Galleryで結果を見る', html)
         self.assertIn('generation-result-summary', css)
         self.assertIn('generation-job-id', css)

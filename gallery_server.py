@@ -54,6 +54,7 @@ TAILSCALE_IPV4_NETWORK = ipaddress.ip_network("100.64.0.0/10")
 TAILSCALE_IPV6_NETWORK = ipaddress.ip_network("fd7a:115c:a1e0::/48")
 _ABSOLUTE_PATH_RE = re.compile(r"(?:(?:[A-Za-z]:)?[\\/])(?:[^\s,;]+[\\/])+[^\s,;]+")
 _GENERATION_JOB_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+_GALLERY_IMAGE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 _GENERATION_SESSIONS: dict[str, dict[str, Any]] = {}
 _GENERATION_SESSIONS_LOCK = threading.RLock()
 
@@ -439,20 +440,14 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
             return self._send_error_json("Generation Backendの応答が不正です。", HTTPStatus.BAD_GATEWAY)
         return self._send_json(_sanitize_proxy_value(value), status)
 
-    def _proxy_generation_reference_upload(self) -> None:
-        """Forward one multipart image without interpreting or storing paths."""
+    def _proxy_generation_reference_body(
+        self,
+        body: bytes,
+        content_type: str,
+        response_metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Forward one server-resolved image through the existing asset API."""
 
-        raw_length = self.headers.get("Content-Length")
-        try:
-            length = int(raw_length or "0")
-        except ValueError as error:
-            raise GalleryError("Content-Lengthが不正です。") from error
-        if length < 1 or length > self.generation_reference_max_body_bytes:
-            raise RequestTooLargeError("参考画像が大きすぎます。")
-        content_type = self.headers.get("Content-Type", "")
-        if not content_type.casefold().startswith("multipart/form-data"):
-            return self._send_error_json("multipart/form-dataが必要です。", HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
-        body = self.rfile.read(length)
         request = urllib_request.Request(
             f"{self._generation_backend_url()}/api/generation/references",
             data=body,
@@ -479,7 +474,64 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
             return self._send_error_json("Generation Backendの応答を読み取れません。", HTTPStatus.BAD_GATEWAY)
         if not isinstance(value, dict):
             return self._send_error_json("Generation Backendの応答が不正です。", HTTPStatus.BAD_GATEWAY)
+        if response_metadata:
+            value = {**value, **response_metadata}
         return self._send_json(_sanitize_proxy_value(value), status)
+
+    def _proxy_generation_reference_upload(self) -> None:
+        """Forward one multipart image without interpreting or storing paths."""
+
+        raw_length = self.headers.get("Content-Length")
+        try:
+            length = int(raw_length or "0")
+        except ValueError as error:
+            raise GalleryError("Content-Lengthが不正です。") from error
+        if length < 1 or length > self.generation_reference_max_body_bytes:
+            raise RequestTooLargeError("参考画像が大きすぎます。")
+        content_type = self.headers.get("Content-Type", "")
+        if not content_type.casefold().startswith("multipart/form-data"):
+            return self._send_error_json("multipart/form-dataが必要です。", HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+        body = self.rfile.read(length)
+        return self._proxy_generation_reference_body(body, content_type)
+
+    def _proxy_gallery_image_as_reference(self) -> None:
+        """Resolve a Gallery image ID server-side and reuse reference upload."""
+
+        payload = self._request_json(max_body_bytes=GENERATION_PROXY_MAX_BODY_BYTES)
+        if set(payload) != {"gallery_image_id"}:
+            raise GalleryError("gallery_image_idだけを指定してください。")
+        image_id = payload.get("gallery_image_id")
+        if not isinstance(image_id, str) or not _GALLERY_IMAGE_ID_RE.fullmatch(image_id):
+            return self._send_error_json("Gallery画像IDが不正です。", HTTPStatus.BAD_REQUEST)
+        resolved = self.store.resolve_image(image_id)
+        if resolved is None:
+            return self._send_error_json("Gallery画像が見つかりません。", HTTPStatus.NOT_FOUND)
+        image_path, image_content_type = resolved
+        suffixes = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
+        suffix = suffixes.get(image_content_type.casefold())
+        if suffix is None:
+            return self._send_error_json("Gallery画像の形式に対応していません。", HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+        try:
+            if image_path.stat().st_size > GENERATION_REFERENCE_MAX_BODY_BYTES:
+                return self._send_error_json("参考画像が大きすぎます。", HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            image_bytes = image_path.read_bytes()
+        except OSError:
+            return self._send_error_json("Gallery画像を読み込めません。", HTTPStatus.NOT_FOUND)
+        boundary = f"----gallery-reference-{secrets.token_hex(16)}"
+        multipart_type = f"multipart/form-data; boundary={boundary}"
+        safe_filename = f"gallery-{image_id}{suffix}"
+        body = (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="file"; filename="{safe_filename}"\r\n'
+            f"Content-Type: {image_content_type}\r\n\r\n"
+        ).encode("ascii") + image_bytes + f"\r\n--{boundary}--\r\n".encode("ascii")
+        # The backend intentionally returns only opaque asset metadata. Add the
+        # Gallery filename for UI display without exposing the source path.
+        return self._proxy_generation_reference_body(
+            body,
+            multipart_type,
+            response_metadata={"filename": image_path.name, "source": "gallery"},
+        )
 
     def _generation_job_path(self, path: str) -> str | None:
         prefix = "/api/generation/jobs/"
@@ -851,6 +903,13 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
                 ):
                     return None
                 return self._proxy_generation_reference_upload()
+            if path == "/api/generation/references/from-gallery":
+                if not self._require_generation_access(
+                    mutation=True,
+                    denied_message="この端末からGallery画像を参照登録できません。",
+                ):
+                    return None
+                return self._proxy_gallery_image_as_reference()
             if path == "/api/ai/review":
                 payload = self._request_json()
                 self.store.sync()
