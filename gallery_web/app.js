@@ -26,6 +26,13 @@
       pollTimer: null,
       submitting: false,
       tracking: GenerationPollGuard.create(),
+      auth: {
+        required: false,
+        authenticated: false,
+        remembered: false,
+        csrfToken: "",
+        network: "unknown",
+      },
     },
     dispersionFilter: { dimension: "", value: "", label: "" },
   };
@@ -45,6 +52,61 @@
     const element = $("#generation-status");
     element.textContent = text || "";
     element.classList.toggle("error", error);
+  }
+
+  function updateGenerationAuthUi() {
+    const auth = state.generation.auth;
+    const capability = $("#generation-capability");
+    const authStatus = $("#generation-auth-status");
+    const authSubmit = $("#generation-auth-submit");
+    const authLogout = $("#generation-auth-logout");
+    const tokenInput = $("#generation-auth-token");
+    const rememberInput = $("#generation-auth-remember");
+    const generationSubmit = $("#generation-submit");
+    if (!capability || !authStatus || !authSubmit || !authLogout || !tokenInput || !rememberInput || !generationSubmit) return;
+    const tokenLabel = tokenInput.closest("label");
+    const rememberLabel = rememberInput.closest("label");
+    if (!auth.required) {
+      capability.textContent = "生成可能（このPC）";
+      capability.classList.add("ready");
+      capability.classList.remove("remote");
+      authStatus.textContent = "この端末では追加認証は不要です。";
+      authSubmit.hidden = true;
+      authLogout.hidden = true;
+      if (tokenLabel) tokenLabel.hidden = true;
+      if (rememberLabel) rememberLabel.hidden = true;
+      generationSubmit.disabled = Boolean(state.generation.submitting);
+      return;
+    }
+    if (auth.authenticated) {
+      capability.textContent = "生成可能（認証済みTailscale）";
+      capability.classList.add("ready");
+      capability.classList.remove("remote");
+      authStatus.textContent = auth.remembered
+        ? "リモート生成が解除されています（この端末を30日間記憶中）。"
+        : "リモート生成が解除されています。";
+      authSubmit.hidden = true;
+      authLogout.hidden = false;
+      if (tokenLabel) tokenLabel.hidden = true;
+      if (rememberLabel) rememberLabel.hidden = true;
+      generationSubmit.disabled = Boolean(state.generation.submitting);
+    } else {
+      capability.textContent = "リモート生成は認証が必要です";
+      capability.classList.remove("ready");
+      capability.classList.add("remote");
+      authStatus.textContent = "キーを入力して生成を解除してください。";
+      authSubmit.hidden = false;
+      authLogout.hidden = true;
+      if (tokenLabel) tokenLabel.hidden = false;
+      if (rememberLabel) rememberLabel.hidden = false;
+      generationSubmit.disabled = true;
+    }
+  }
+
+  function generationMutationHeaders(headers = {}) {
+    const result = { ...headers };
+    if (state.generation.auth.csrfToken) result["X-Gallery-Generation-CSRF"] = state.generation.auth.csrfToken;
+    return result;
   }
 
   function addSelectOption(select, value, label) {
@@ -88,6 +150,89 @@
     const capability = $("#generation-capability");
     capability.textContent = "生成可能（この端末）";
     capability.classList.add("ready");
+    updateGenerationAuthUi();
+  }
+
+  async function loadGenerationAuthStatus() {
+    try {
+      const response = await fetch("/api/generation/auth/status", { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok || data.ok === false) throw new Error(data.error || "生成認証状態を取得できません。");
+      state.generation.auth.required = Boolean(data.requires_auth);
+      state.generation.auth.authenticated = Boolean(data.authenticated);
+      state.generation.auth.remembered = Boolean(data.remembered);
+      state.generation.auth.csrfToken = typeof data.csrf_token === "string" ? data.csrf_token : "";
+      state.generation.auth.network = data.network || "unknown";
+      updateGenerationAuthUi();
+    } catch (error) {
+      state.generation.auth.required = true;
+      state.generation.auth.authenticated = false;
+      state.generation.auth.remembered = false;
+      state.generation.auth.csrfToken = "";
+      updateGenerationAuthUi();
+      setGenerationStatus(error.message || String(error), true);
+    }
+  }
+
+  async function unlockGeneration() {
+    const tokenInput = $("#generation-auth-token");
+    const token = tokenInput.value;
+    if (!token) {
+      setGenerationStatus("リモート生成キーを入力してください。", true);
+      return;
+    }
+    const button = $("#generation-auth-submit");
+    button.disabled = true;
+    try {
+      const response = await fetch("/api/generation/auth/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token,
+          remember_device: Boolean($("#generation-auth-remember").checked),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || data.ok === false) throw new Error(data.error || "生成認証に失敗しました。");
+      tokenInput.value = "";
+      state.generation.auth.authenticated = true;
+      state.generation.auth.remembered = Boolean(data.remembered);
+      state.generation.auth.csrfToken = typeof data.csrf_token === "string" ? data.csrf_token : "";
+      updateGenerationAuthUi();
+      setGenerationStatus("リモート生成を解除しました。");
+    } catch (error) {
+      state.generation.auth.authenticated = false;
+      state.generation.auth.remembered = false;
+      state.generation.auth.csrfToken = "";
+      updateGenerationAuthUi();
+      setGenerationStatus(error.message || String(error), true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function logoutGeneration() {
+    const button = $("#generation-auth-logout");
+    button.disabled = true;
+    try {
+      const response = await fetch("/api/generation/auth/logout", {
+        method: "POST",
+        headers: generationMutationHeaders(),
+      });
+      const data = await response.json();
+      if (!response.ok || data.ok === false) throw new Error(data.error || "端末認証を解除できません。");
+      state.generation.auth.authenticated = false;
+      state.generation.auth.remembered = false;
+      state.generation.auth.csrfToken = "";
+      $("#generation-auth-token").value = "";
+      $("#generation-auth-remember").checked = false;
+      updateGenerationAuthUi();
+      setGenerationStatus("この端末の認証を解除しました。");
+    } catch (error) {
+      setGenerationStatus(error.message || String(error), true);
+    } finally {
+      button.disabled = false;
+    }
   }
 
   async function loadGenerationOptions() {
@@ -146,7 +291,11 @@
     if (file.type && !allowed.has(file.type)) throw new Error("参考画像はPNG / JPEG / WebPだけ対応しています。");
     const form = new FormData();
     form.append("file", file, file.name);
-    const response = await fetch("/api/generation/references", { method: "POST", body: form });
+    const response = await fetch("/api/generation/references", {
+      method: "POST",
+      headers: generationMutationHeaders(),
+      body: form,
+    });
     const data = await response.json();
     if (!response.ok || data.ok === false || !data.reference_image_id) {
       throw new Error(data.error || "参考画像を登録できません。");
@@ -252,6 +401,10 @@
 
   async function submitGeneration() {
     if (state.generation.submitting) return;
+    if (state.generation.auth.required && !state.generation.auth.authenticated) {
+      setGenerationStatus("リモート生成キーで認証してください。", true);
+      return;
+    }
     invalidateGenerationTracking();
     state.generation.submitting = true;
     $("#generation-submit").disabled = true;
@@ -262,7 +415,7 @@
       const referenceImageId = await uploadGenerationReference();
       const response = await fetch("/api/generation/jobs", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: generationMutationHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(generationPayload(referenceImageId)),
       });
       const data = await response.json();
@@ -949,10 +1102,13 @@
   document.addEventListener("DOMContentLoaded", () => {
     $("#refresh").addEventListener("click", () => load({ page: state.page }));
     $("#generation-submit").addEventListener("click", submitGeneration);
+    $("#generation-auth-submit").addEventListener("click", unlockGeneration);
+    $("#generation-auth-logout").addEventListener("click", logoutGeneration);
     $("#generation-count").addEventListener("change", updateGenerationVariationState);
     $("#generation-reference-mode").addEventListener("change", updateGenerationReferenceState);
     updateGenerationReferenceState();
     updateGenerationVariationState();
+    loadGenerationAuthStatus();
     for (const type of ["character", "style", "additional"]) {
       $(`#generation-${type}-lora`).addEventListener("change", () => updateGenerationLoraDefault(type));
     }

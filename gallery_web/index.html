@@ -74,6 +74,17 @@
         </div>
         <span id="generation-capability" class="generation-capability" role="status">接続確認中…</span>
       </div>
+      <div class="generation-auth" aria-live="polite">
+        <label>リモート生成キー
+          <input id="generation-auth-token" type="password" autocomplete="current-password" placeholder="Tailscale接続時のみ">
+        </label>
+        <label class="generation-auth-remember">
+          <span><input id="generation-auth-remember" type="checkbox"> この端末を30日間記憶する</span>
+        </label>
+        <button id="generation-auth-submit" class="button secondary" type="button">生成を解除</button>
+        <button id="generation-auth-logout" class="button secondary" type="button" hidden>この端末の認証を解除</button>
+        <span id="generation-auth-status" class="generation-auth-status">接続確認中…</span>
+      </div>
       <div class="generation-grid">
         <label>キャラクタープリセット
           <select id="generation-character-preset"><option value="">なし</option></select>

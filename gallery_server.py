@@ -8,14 +8,21 @@ ComfyUIのoutputフォルダなどを --images-root で指定できる。
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
+import hmac
 import ipaddress
 import json
 import os
 import re
+import secrets
 import socket
 import subprocess
 import sys
+import threading
+import time
 import uuid
+from http.cookies import CookieError, SimpleCookie
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -36,8 +43,19 @@ DEFAULT_GENERATION_BACKEND_URL = "http://127.0.0.1:8787"
 GENERATION_PROXY_MAX_BODY_BYTES = 64 * 1024
 GENERATION_REFERENCE_MAX_BODY_BYTES = 10 * 1024 * 1024
 GENERATION_PROXY_TIMEOUT_SECONDS = 15
+GENERATION_AUTH_TOKEN_ENV = "GALLERY_GENERATION_AUTH_TOKEN"
+GENERATION_SESSION_SECRET_ENV = "GALLERY_GENERATION_SESSION_SECRET"
+GENERATION_SESSION_COOKIE = "gallery_generation_session"
+GENERATION_PERSISTENT_COOKIE = "gallery_generation_device"
+GENERATION_CSRF_HEADER = "X-Gallery-Generation-CSRF"
+GENERATION_SESSION_MAX_AGE_SECONDS = 12 * 60 * 60
+GENERATION_PERSISTENT_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
+TAILSCALE_IPV4_NETWORK = ipaddress.ip_network("100.64.0.0/10")
+TAILSCALE_IPV6_NETWORK = ipaddress.ip_network("fd7a:115c:a1e0::/48")
 _ABSOLUTE_PATH_RE = re.compile(r"(?:(?:[A-Za-z]:)?[\\/])(?:[^\s,;]+[\\/])+[^\s,;]+")
 _GENERATION_JOB_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+_GENERATION_SESSIONS: dict[str, dict[str, Any]] = {}
+_GENERATION_SESSIONS_LOCK = threading.RLock()
 
 
 class RequestTooLargeError(GalleryError):
@@ -49,6 +67,138 @@ def _is_loopback_client(address: str) -> bool:
         return ipaddress.ip_address(address).is_loopback
     except ValueError:
         return False
+
+
+def _is_tailscale_client(address: str) -> bool:
+    """Classify a socket peer as a Tailscale-routed address.
+
+    This is only a network-path gate.  It is deliberately not sufficient for
+    generation access; remote clients must also present a valid session.
+    """
+
+    try:
+        parsed = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+    return parsed in TAILSCALE_IPV4_NETWORK or parsed in TAILSCALE_IPV6_NETWORK
+
+
+def _client_network(address: str) -> str:
+    if _is_loopback_client(address):
+        return "loopback"
+    if _is_tailscale_client(address):
+        return "tailscale"
+    return "other"
+
+
+def _generation_auth_token() -> str:
+    return os.environ.get(GENERATION_AUTH_TOKEN_ENV, "").strip()
+
+
+def _generation_session_secret() -> str:
+    return os.environ.get(GENERATION_SESSION_SECRET_ENV, "").strip()
+
+
+def _peer_binding(client_address: str, secret: str) -> str:
+    return hmac.new(secret.encode("utf-8"), client_address.encode("utf-8"), "sha256").hexdigest()
+
+
+def _encode_signed_persistent_session(client_address: str, *, now: int | None = None) -> str | None:
+    secret = _generation_session_secret()
+    if not secret:
+        return None
+    issued_at = int(time.time() if now is None else now)
+    payload = {
+        "v": 1,
+        "issued_at": issued_at,
+        "expires_at": issued_at + GENERATION_PERSISTENT_MAX_AGE_SECONDS,
+        "peer": _peer_binding(client_address, secret),
+        "csrf_token": secrets.token_urlsafe(24),
+    }
+    encoded = base64.urlsafe_b64encode(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).rstrip(b"=").decode("ascii")
+    signature = hmac.new(secret.encode("utf-8"), encoded.encode("ascii"), "sha256").hexdigest()
+    return f"{encoded}.{signature}"
+
+
+def _decode_signed_persistent_session(
+    value: str, client_address: str, *, now: int | None = None
+) -> dict[str, Any] | None:
+    secret = _generation_session_secret()
+    if not secret or not value:
+        return None
+    try:
+        encoded, signature = value.split(".", 1)
+        expected = hmac.new(secret.encode("utf-8"), encoded.encode("ascii"), "sha256").hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            return None
+        padded = encoded + "=" * (-len(encoded) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except (ValueError, UnicodeError, json.JSONDecodeError, TypeError, binascii.Error):
+        return None
+    if not isinstance(payload, dict) or payload.get("v") != 1:
+        return None
+    issued_at = payload.get("issued_at")
+    expires_at = payload.get("expires_at")
+    csrf_token = payload.get("csrf_token")
+    if not isinstance(issued_at, int) or not isinstance(expires_at, int) or not isinstance(csrf_token, str):
+        return None
+    current = int(time.time() if now is None else now)
+    if expires_at <= current or issued_at > current + 300:
+        return None
+    if not hmac.compare_digest(str(payload.get("peer", "")), _peer_binding(client_address, secret)):
+        return None
+    return {
+        "csrf_token": csrf_token,
+        "expires_at": expires_at,
+        "persistent": True,
+    }
+
+
+def _cleanup_generation_sessions(now: float | None = None) -> None:
+    current = time.time() if now is None else now
+    with _GENERATION_SESSIONS_LOCK:
+        expired = [
+            session_id
+            for session_id, session in _GENERATION_SESSIONS.items()
+            if float(session.get("expires_at", 0)) <= current
+        ]
+        for session_id in expired:
+            _GENERATION_SESSIONS.pop(session_id, None)
+
+
+def _new_generation_session(client_address: str) -> tuple[str, str]:
+    _cleanup_generation_sessions()
+    session_id = secrets.token_urlsafe(32)
+    csrf_token = secrets.token_urlsafe(24)
+    with _GENERATION_SESSIONS_LOCK:
+        _GENERATION_SESSIONS[session_id] = {
+            "client_address": client_address,
+            "csrf_token": csrf_token,
+            "expires_at": time.time() + GENERATION_SESSION_MAX_AGE_SECONDS,
+        }
+    return session_id, csrf_token
+
+
+def _generation_session_from_request(handler: BaseHTTPRequestHandler) -> dict[str, Any] | None:
+    cookie = SimpleCookie()
+    try:
+        cookie.load(handler.headers.get("Cookie", ""))
+    except (CookieError, ValueError):
+        return None
+    morsel = cookie.get(GENERATION_SESSION_COOKIE)
+    if morsel is not None and morsel.value:
+        session_id = morsel.value
+        _cleanup_generation_sessions()
+        with _GENERATION_SESSIONS_LOCK:
+            session = _GENERATION_SESSIONS.get(session_id)
+            if session is not None and session.get("client_address") == handler.client_address[0]:
+                return dict(session)
+    persistent = cookie.get(GENERATION_PERSISTENT_COOKIE)
+    if persistent is not None and persistent.value:
+        return _decode_signed_persistent_session(persistent.value, handler.client_address[0])
+    return None
 
 
 def _sanitize_proxy_value(value: Any) -> Any:
@@ -189,17 +339,32 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
 
     server_version = "LocalImageGallery/1.0"
 
-    def _send_bytes(self, body: bytes, content_type: str, status: int = HTTPStatus.OK) -> None:
+    def _send_bytes(
+        self,
+        body: bytes,
+        content_type: str,
+        status: int = HTTPStatus.OK,
+        extra_headers: dict[str, str | list[str]] | None = None,
+    ) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for key, value in (extra_headers or {}).items():
+            values = value if isinstance(value, list) else [value]
+            for item in values:
+                self.send_header(key, item)
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_json(self, value: Any, status: int = HTTPStatus.OK) -> None:
+    def _send_json(
+        self,
+        value: Any,
+        status: int = HTTPStatus.OK,
+        extra_headers: dict[str, str | list[str]] | None = None,
+    ) -> None:
         body = json.dumps(value, ensure_ascii=False).encode("utf-8")
-        self._send_bytes(body, "application/json; charset=utf-8", status)
+        self._send_bytes(body, "application/json; charset=utf-8", status, extra_headers)
 
     def _send_error_json(self, message: str, status: int = HTTPStatus.BAD_REQUEST) -> None:
         self._send_json({"ok": False, "error": message}, status)
@@ -333,8 +498,12 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
                 return self._proxy_generation_json("GET", path)
             if path == "/api/generation/options":
                 return self._proxy_generation_json("GET", path)
+            if path == "/api/generation/auth/status":
+                return self._send_json(self._generation_auth_status())
             generation_job_path = self._generation_job_path(path)
             if generation_job_path is not None:
+                if not self._require_generation_access():
+                    return None
                 return self._proxy_generation_json("GET", generation_job_path)
             if path == "/" or path == "/index.html":
                 return self._serve_index()
@@ -531,20 +700,156 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
             raise GalleryError("JSONオブジェクトを指定してください。")
         return value
 
+    def _same_origin(self) -> bool:
+        origin = self.headers.get("Origin", "").strip()
+        host = self.headers.get("Host", "").strip()
+        if not origin or not host:
+            return False
+        parsed = urlsplit(origin)
+        return (
+            parsed.scheme in {"http", "https"}
+            and not parsed.username
+            and not parsed.password
+            and parsed.netloc.casefold() == host.casefold()
+        )
+
+    def _generation_auth_status(self) -> dict[str, Any]:
+        network = _client_network(self.client_address[0])
+        if network == "loopback":
+            return {
+                "ok": True,
+                "network": network,
+                "requires_auth": False,
+                "authenticated": True,
+                "csrf_token": None,
+                "remembered": False,
+            }
+        session = _generation_session_from_request(self)
+        authenticated = network == "tailscale" and session is not None
+        return {
+            "ok": True,
+            "network": network,
+            "requires_auth": True,
+            "authenticated": authenticated,
+            "csrf_token": session.get("csrf_token") if authenticated and session else None,
+            "remembered": bool(authenticated and session and session.get("persistent")),
+        }
+
+    def _require_generation_access(
+        self,
+        *,
+        mutation: bool = False,
+        denied_message: str = "この端末からは生成を実行できません。",
+    ) -> bool:
+        network = _client_network(self.client_address[0])
+        if network == "loopback":
+            return True
+        if network != "tailscale":
+            self._send_error_json(denied_message, HTTPStatus.FORBIDDEN)
+            return False
+        session = _generation_session_from_request(self)
+        if session is None:
+            self._send_error_json("生成の認証が必要です。", HTTPStatus.UNAUTHORIZED)
+            return False
+        if mutation:
+            if not self._same_origin():
+                self._send_error_json("生成リクエストの送信元を確認できません。", HTTPStatus.FORBIDDEN)
+                return False
+            csrf = self.headers.get(GENERATION_CSRF_HEADER, "")
+            if not csrf or not hmac.compare_digest(csrf, str(session.get("csrf_token", ""))):
+                self._send_error_json("生成リクエストの検証に失敗しました。", HTTPStatus.FORBIDDEN)
+                return False
+        return True
+
+    def _authenticate_generation_session(self) -> None:
+        network = _client_network(self.client_address[0])
+        if network == "other":
+            return self._send_error_json("Tailscale経由の端末だけ認証できます。", HTTPStatus.FORBIDDEN)
+        if network != "loopback" and not self._same_origin():
+            return self._send_error_json("認証リクエストの送信元を確認できません。", HTTPStatus.FORBIDDEN)
+        configured = _generation_auth_token()
+        if not configured:
+            return self._send_error_json("リモート生成認証が設定されていません。", HTTPStatus.SERVICE_UNAVAILABLE)
+        content_type = self.headers.get("Content-Type", "").casefold()
+        if not content_type.startswith("application/json"):
+            return self._send_error_json("Content-Type: application/json が必要です。", HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+        payload = self._request_json(max_body_bytes=8 * 1024)
+        remember_device = payload.get("remember_device", False)
+        if not isinstance(remember_device, bool) or set(payload) - {"token", "remember_device"}:
+            return self._send_error_json("認証リクエストの形式が不正です。", HTTPStatus.BAD_REQUEST)
+        if not isinstance(payload.get("token"), str):
+            return self._send_error_json("認証tokenを指定してください。", HTTPStatus.BAD_REQUEST)
+        if not hmac.compare_digest(payload["token"], configured):
+            return self._send_error_json("認証に失敗しました。", HTTPStatus.UNAUTHORIZED)
+        if remember_device and not _generation_session_secret():
+            return self._send_error_json("端末記憶用の署名secretが設定されていません。", HTTPStatus.SERVICE_UNAVAILABLE)
+        session_id, csrf_token = _new_generation_session(self.client_address[0])
+        session_cookie = (
+            f"{GENERATION_SESSION_COOKIE}={session_id}; Path=/api/generation; "
+            f"Max-Age={GENERATION_SESSION_MAX_AGE_SECONDS}; HttpOnly; SameSite=Strict"
+        )
+        cookies: list[str] = [session_cookie]
+        if remember_device:
+            persistent_value = _encode_signed_persistent_session(self.client_address[0])
+            if persistent_value is None:
+                return self._send_error_json("端末記憶用の署名secretが設定されていません。", HTTPStatus.SERVICE_UNAVAILABLE)
+            cookies.append(
+                f"{GENERATION_PERSISTENT_COOKIE}={persistent_value}; Path=/api/generation; "
+                f"Max-Age={GENERATION_PERSISTENT_MAX_AGE_SECONDS}; HttpOnly; SameSite=Strict"
+            )
+        else:
+            cookies.append(
+                f"{GENERATION_PERSISTENT_COOKIE}=; Path=/api/generation; Max-Age=0; HttpOnly; SameSite=Strict"
+            )
+        return self._send_json(
+            {"ok": True, "authenticated": True, "csrf_token": csrf_token, "remembered": remember_device},
+            HTTPStatus.OK,
+            {"Set-Cookie": cookies},
+        )
+
+    def _logout_generation_session(self) -> None:
+        if not self._require_generation_access(mutation=True, denied_message="認証済み端末だけ解除できます。"):
+            return None
+        cookie = SimpleCookie()
+        try:
+            cookie.load(self.headers.get("Cookie", ""))
+        except (CookieError, ValueError):
+            cookie = SimpleCookie()
+        session_cookie = cookie.get(GENERATION_SESSION_COOKIE)
+        if session_cookie is not None:
+            with _GENERATION_SESSIONS_LOCK:
+                _GENERATION_SESSIONS.pop(session_cookie.value, None)
+        clear_cookies = [
+            f"{GENERATION_SESSION_COOKIE}=; Path=/api/generation; Max-Age=0; HttpOnly; SameSite=Strict",
+            f"{GENERATION_PERSISTENT_COOKIE}=; Path=/api/generation; Max-Age=0; HttpOnly; SameSite=Strict",
+        ]
+        return self._send_json(
+            {"ok": True, "authenticated": False, "remembered": False, "csrf_token": None},
+            HTTPStatus.OK,
+            {"Set-Cookie": clear_cookies},
+        )
+
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         path = urlsplit(self.path).path
         try:
+            if path == "/api/generation/auth/session":
+                return self._authenticate_generation_session()
+            if path == "/api/generation/auth/logout":
+                return self._logout_generation_session()
             if path == "/api/generation/jobs":
-                if not _is_loopback_client(self.client_address[0]):
-                    return self._send_error_json("この端末からは生成を実行できません。", HTTPStatus.FORBIDDEN)
+                if not self._require_generation_access(mutation=True):
+                    return None
                 content_type = self.headers.get("Content-Type", "").casefold()
                 if not content_type.startswith("application/json"):
                     return self._send_error_json("Content-Type: application/json が必要です。", HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
                 payload = self._request_json(max_body_bytes=self.generation_max_body_bytes)
                 return self._proxy_generation_json("POST", path, payload)
             if path == "/api/generation/references":
-                if not _is_loopback_client(self.client_address[0]):
-                    return self._send_error_json("この端末からは生成用画像を登録できません。", HTTPStatus.FORBIDDEN)
+                if not self._require_generation_access(
+                    mutation=True,
+                    denied_message="この端末からは生成用画像を登録できません。",
+                ):
+                    return None
                 return self._proxy_generation_reference_upload()
             if path == "/api/ai/review":
                 payload = self._request_json()
