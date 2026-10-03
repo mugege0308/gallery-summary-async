@@ -34,6 +34,7 @@ WEB_ROOT = PROJECT_ROOT / "gallery_web"
 AI_JOB_FILE = PROJECT_ROOT / ".gallery" / "ai_review_job.json"
 DEFAULT_GENERATION_BACKEND_URL = "http://127.0.0.1:8787"
 GENERATION_PROXY_MAX_BODY_BYTES = 64 * 1024
+GENERATION_REFERENCE_MAX_BODY_BYTES = 10 * 1024 * 1024
 GENERATION_PROXY_TIMEOUT_SECONDS = 15
 _ABSOLUTE_PATH_RE = re.compile(r"(?:(?:[A-Za-z]:)?[\\/])(?:[^\s,;]+[\\/])+[^\s,;]+")
 _GENERATION_JOB_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
@@ -184,6 +185,7 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
     web_root: Path
     max_body_bytes = 4 * 1024 * 1024
     generation_max_body_bytes = GENERATION_PROXY_MAX_BODY_BYTES
+    generation_reference_max_body_bytes = GENERATION_REFERENCE_MAX_BODY_BYTES
 
     server_version = "LocalImageGallery/1.0"
 
@@ -260,12 +262,55 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
             if not isinstance(value, dict):
                 value = {"ok": False, "error": "Generation Backendが不正な応答を返しました。"}
             value = _sanitize_proxy_value(value)
+            status = int(getattr(error, "code", HTTPStatus.BAD_GATEWAY))
             return self._send_json(value, status if 400 <= status <= 599 else HTTPStatus.BAD_GATEWAY)
         except (urllib_error.URLError, TimeoutError, OSError):
             return self._send_error_json("Generation Backendに接続できません。", HTTPStatus.BAD_GATEWAY)
         try:
             value = json.loads(raw.decode("utf-8"))
         except (UnicodeError, json.JSONDecodeError) as error:
+            return self._send_error_json("Generation Backendの応答を読み取れません。", HTTPStatus.BAD_GATEWAY)
+        if not isinstance(value, dict):
+            return self._send_error_json("Generation Backendの応答が不正です。", HTTPStatus.BAD_GATEWAY)
+        return self._send_json(_sanitize_proxy_value(value), status)
+
+    def _proxy_generation_reference_upload(self) -> None:
+        """Forward one multipart image without interpreting or storing paths."""
+
+        raw_length = self.headers.get("Content-Length")
+        try:
+            length = int(raw_length or "0")
+        except ValueError as error:
+            raise GalleryError("Content-Lengthが不正です。") from error
+        if length < 1 or length > self.generation_reference_max_body_bytes:
+            raise RequestTooLargeError("参考画像が大きすぎます。")
+        content_type = self.headers.get("Content-Type", "")
+        if not content_type.casefold().startswith("multipart/form-data"):
+            return self._send_error_json("multipart/form-dataが必要です。", HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+        body = self.rfile.read(length)
+        request = urllib_request.Request(
+            f"{self._generation_backend_url()}/api/generation/references",
+            data=body,
+            headers={"Accept": "application/json", "Content-Type": content_type},
+            method="POST",
+        )
+        try:
+            with urllib_request.urlopen(request, timeout=GENERATION_PROXY_TIMEOUT_SECONDS) as response:
+                status = int(response.status)
+                raw = response.read(128 * 1024)
+        except urllib_error.HTTPError as error:
+            try:
+                raw = error.read(128 * 1024)
+                value = json.loads(raw.decode("utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+                value = {"ok": False, "error": "Generation Backendがエラーを返しました。"}
+            status = int(getattr(error, "code", HTTPStatus.BAD_GATEWAY))
+            return self._send_json(_sanitize_proxy_value(value), status if 400 <= status <= 599 else HTTPStatus.BAD_GATEWAY)
+        except (urllib_error.URLError, TimeoutError, OSError):
+            return self._send_error_json("Generation Backendに接続できません。", HTTPStatus.BAD_GATEWAY)
+        try:
+            value = json.loads(raw.decode("utf-8"))
+        except (UnicodeError, json.JSONDecodeError):
             return self._send_error_json("Generation Backendの応答を読み取れません。", HTTPStatus.BAD_GATEWAY)
         if not isinstance(value, dict):
             return self._send_error_json("Generation Backendの応答が不正です。", HTTPStatus.BAD_GATEWAY)
@@ -497,6 +542,10 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
                     return self._send_error_json("Content-Type: application/json が必要です。", HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
                 payload = self._request_json(max_body_bytes=self.generation_max_body_bytes)
                 return self._proxy_generation_json("POST", path, payload)
+            if path == "/api/generation/references":
+                if not _is_loopback_client(self.client_address[0]):
+                    return self._send_error_json("この端末からは生成用画像を登録できません。", HTTPStatus.FORBIDDEN)
+                return self._proxy_generation_reference_upload()
             if path == "/api/ai/review":
                 payload = self._request_json()
                 self.store.sync()

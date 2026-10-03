@@ -118,7 +118,43 @@
     return result;
   }
 
-  function generationPayload() {
+  function generationReferenceMode() {
+    return $("#generation-reference-mode").value || "none";
+  }
+
+  function updateGenerationReferenceState() {
+    const mode = generationReferenceMode();
+    const enabled = mode !== "none";
+    $("#generation-reference-file").disabled = !enabled;
+    $("#generation-reference-strength").disabled = !enabled;
+    // The existing composition/IP-Adapter workflow has no fit input.  Fit is
+    // exposed only for the existing pose preprocessing path.
+    $("#generation-reference-fit").disabled = mode !== "pose";
+    const defaults = state.generation.options?.reference?.default_strengths || {};
+    if (enabled && defaults[mode] != null) $("#generation-reference-strength").value = defaults[mode];
+    if (!enabled) $("#generation-reference-file").value = "";
+  }
+
+  async function uploadGenerationReference() {
+    const mode = generationReferenceMode();
+    if (mode === "none") return null;
+    const file = $("#generation-reference-file").files[0];
+    if (!file) throw new Error("Reference modeを使う場合は画像を1枚選択してください。");
+    const allowed = new Set(["image/png", "image/jpeg", "image/webp"]);
+    const maxBytes = Number(state.generation.options?.reference?.max_upload_bytes || 10 * 1024 * 1024);
+    if (file.size > maxBytes) throw new Error("参考画像が大きすぎます。");
+    if (file.type && !allowed.has(file.type)) throw new Error("参考画像はPNG / JPEG / WebPだけ対応しています。");
+    const form = new FormData();
+    form.append("file", file, file.name);
+    const response = await fetch("/api/generation/references", { method: "POST", body: form });
+    const data = await response.json();
+    if (!response.ok || data.ok === false || !data.reference_image_id) {
+      throw new Error(data.error || "参考画像を登録できません。");
+    }
+    return data.reference_image_id;
+  }
+
+  function generationPayload(referenceImageId = null) {
     const rawSeed = $("#generation-seed").value.trim();
     const seed = rawSeed === "" ? -1 : Number(rawSeed);
     if (!Number.isInteger(seed) || seed < -1) throw new Error("Seedは-1または0以上の整数で指定してください。");
@@ -135,6 +171,10 @@
       count: Number($("#generation-count").value || 1),
       variation: $("#generation-variation").value || "off",
       seed,
+      reference_mode: generationReferenceMode(),
+      reference_image_id: referenceImageId,
+      reference_strength: Number($("#generation-reference-strength").value),
+      reference_fit: $("#generation-reference-fit").value || "contain",
     };
   }
 
@@ -217,10 +257,13 @@
     $("#generation-submit").disabled = true;
     setGenerationStatus("送信中…");
     try {
+      const referenceMode = generationReferenceMode();
+      if (referenceMode !== "none") setGenerationStatus("参考画像を登録中…");
+      const referenceImageId = await uploadGenerationReference();
       const response = await fetch("/api/generation/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(generationPayload()),
+        body: JSON.stringify(generationPayload(referenceImageId)),
       });
       const data = await response.json();
       if (!response.ok || data.ok === false) throw new Error(data.error || "生成を開始できません。");
@@ -907,6 +950,8 @@
     $("#refresh").addEventListener("click", () => load({ page: state.page }));
     $("#generation-submit").addEventListener("click", submitGeneration);
     $("#generation-count").addEventListener("change", updateGenerationVariationState);
+    $("#generation-reference-mode").addEventListener("change", updateGenerationReferenceState);
+    updateGenerationReferenceState();
     updateGenerationVariationState();
     for (const type of ["character", "style", "additional"]) {
       $(`#generation-${type}-lora`).addEventListener("change", () => updateGenerationLoraDefault(type));

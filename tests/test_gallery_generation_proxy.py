@@ -44,7 +44,15 @@ class FakeGenerationBackendHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         length = int(self.headers.get("Content-Length", "0"))
-        FakeGenerationBackendHandler.last_payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        content_type = self.headers.get("Content-Type", "")
+        body = self.rfile.read(length)
+        if content_type.casefold().startswith("multipart/form-data"):
+            FakeGenerationBackendHandler.last_payload = {"multipart": True, "length": len(body)}
+            return self._json(
+                {"reference_image_id": "asset-123", "content_type": "image/png", "width": 32, "height": 24},
+                201,
+            )
+        FakeGenerationBackendHandler.last_payload = json.loads(body.decode("utf-8"))
         return self._json(
             {
                 "job_id": "job-1",
@@ -126,6 +134,28 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertEqual(FakeGenerationBackendHandler.last_payload, payload)
         self.assertNotIn(r"C:\private", json.dumps(value))
 
+    def test_localhost_reference_upload_forwards_multipart(self) -> None:
+        boundary = "----codex-reference"
+        body = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="file"; filename="reference.png"\r\n'
+            "Content-Type: image/png\r\n\r\n"
+            "fake-image-bytes\r\n"
+            f"--{boundary}--\r\n"
+        ).encode("utf-8")
+        request = Request(
+            f"http://127.0.0.1:{self.server.server_address[1]}/api/generation/references",
+            data=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
+        )
+        with urlopen(request, timeout=3) as response:
+            status = response.status
+            value = json.loads(response.read().decode("utf-8"))
+        self.assertEqual(201, status)
+        self.assertEqual("asset-123", value["reference_image_id"])
+        self.assertTrue(FakeGenerationBackendHandler.last_payload["multipart"])
+
     def test_job_status_proxy(self) -> None:
         status, value = self.request("GET", "/api/generation/jobs/job-1")
         self.assertEqual(status, 200)
@@ -142,6 +172,24 @@ class GalleryGenerationProxyTests(unittest.TestCase):
             status, value = self.request("POST", "/api/generation/jobs", {"model_key": "animagine"})
         self.assertEqual(status, 403)
         self.assertIn("生成を実行できません", value["error"])
+
+    def test_remote_reference_upload_is_forbidden_before_backend_call(self) -> None:
+        with patch.object(gallery_server, "_is_loopback_client", return_value=False):
+            boundary = "----codex-reference"
+            body = f"--{boundary}--\r\n".encode("utf-8")
+            request = Request(
+                f"http://127.0.0.1:{self.server.server_address[1]}/api/generation/references",
+                data=body,
+                headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+                method="POST",
+            )
+            try:
+                urlopen(request, timeout=3)
+            except HTTPError as error:
+                self.assertEqual(403, error.code)
+                self.assertIn("生成用画像", error.read().decode("utf-8"))
+            else:
+                self.fail("remote reference upload was accepted")
 
     def test_backend_unavailable_is_sanitized_502(self) -> None:
         old = os.environ["GALLERY_GENERATION_BACKEND_URL"]
@@ -190,7 +238,13 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn('id="generation-request"', html)
         self.assertIn('id="generation-count"', html)
         self.assertIn('id="generation-variation"', html)
+        self.assertIn('id="generation-reference-mode"', html)
+        self.assertIn('id="generation-reference-file"', html)
+        self.assertIn('id="generation-reference-strength"', html)
+        self.assertIn('id="generation-reference-fit"', html)
         self.assertIn('/api/generation/jobs', app)
+        self.assertIn('/api/generation/references', app)
+        self.assertIn('reference_mode: generationReferenceMode()', app)
         self.assertIn('freeform_character: $("#generation-freeform-character").value.trim() || null', app)
         self.assertNotIn("freeform_character: null", app)
         self.assertIn('character_preset: $("#generation-character-preset").value || null', app)
