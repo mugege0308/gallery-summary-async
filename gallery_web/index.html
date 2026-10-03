@@ -111,6 +111,15 @@
         <label>Reference image
           <input id="generation-reference-file" type="file" accept="image/png,image/jpeg,image/webp">
         </label>
+        <div class="generation-reference-help-wrap">
+          <span id="generation-reference-mode-hint" class="generation-reference-mode-hint">Referenceなし</span>
+          <small id="generation-reference-help" class="generation-reference-help">Composition または Pose を選ぶと画像を指定できます。</small>
+        </div>
+        <div id="generation-reference-selection" class="generation-reference-selection" hidden>
+          <img id="generation-reference-preview" class="generation-reference-preview" alt="選択したReference画像" hidden>
+          <span id="generation-reference-selection-text"></span>
+          <button id="generation-reference-clear" class="button secondary" type="button">Referenceを解除</button>
+        </div>
         <label>Reference strength
           <input id="generation-reference-strength" type="number" min="0" max="1" step="0.05" value="0.5">
         </label>
@@ -170,6 +179,21 @@
         <button id="generation-submit" class="button primary" type="button">生成する</button>
         <span id="generation-status" class="generation-status" role="status">未実行</span>
       </div>
+      <section id="generation-request-summary" class="generation-request-summary" hidden aria-live="polite">
+        <strong>今回の送信設定</strong>
+        <dl id="generation-request-summary-list" class="generation-summary-list"></dl>
+      </section>
+      <section id="generation-result-summary" class="generation-result-summary" hidden aria-live="polite">
+        <div class="generation-result-head">
+          <strong id="generation-result-state">Completed</strong>
+          <span class="generation-result-job-label">job_id</span>
+          <code id="generation-result-job-id" class="generation-job-id"></code>
+          <button id="generation-copy-job-id" class="button secondary" type="button">job_idをコピー</button>
+          <a id="generation-result-link" class="button secondary" href="#" hidden>Galleryで結果を見る</a>
+          <span id="generation-copy-status" class="generation-copy-status" role="status"></span>
+        </div>
+        <dl id="generation-result-details" class="generation-summary-list"></dl>
+      </section>
     </section>
 
     <section id="job-summary" class="job-summary panel" hidden aria-live="polite">

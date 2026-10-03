@@ -66,9 +66,27 @@ main { max-width: 1680px; margin: 0 auto; padding: 22px clamp(12px, 3vw, 42px) 4
 .generation-grid { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 12px; margin-top: 14px; }
 .generation-grid textarea { width: 100%; min-height: 38px; padding: 7px 10px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; outline: none; background: var(--panel-2); color: var(--text); font: inherit; }
 .generation-grid textarea:focus { border-color: var(--accent); }
+.generation-grid > * { min-width: 0; }
+.generation-reference-help-wrap { display: grid; align-content: end; gap: 3px; min-width: 0; padding: 4px 2px 5px; }
+.generation-reference-mode-hint { color: var(--text); font-size: 12px; font-weight: 600; }
+.generation-reference-help { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.generation-reference-selection { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px; border: 1px solid #53699e; border-radius: 8px; background: #20283a; color: #dce6ff; font-size: 12px; }
+.generation-reference-selection span { min-width: 0; overflow-wrap: anywhere; }
+.generation-reference-preview { width: 48px; height: 48px; flex: 0 0 48px; border-radius: 6px; object-fit: cover; background: #0d0e12; }
+.generation-reference-selection .button { flex: 0 0 auto; }
 .generation-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 .generation-status { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
 .generation-status.error { color: var(--danger); }
+.generation-request-summary, .generation-result-summary { display: grid; gap: 8px; margin-top: 12px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel-2); }
+.generation-request-summary { border-color: #53699e; }
+.generation-result-summary { border-color: #3c8b72; background: linear-gradient(135deg, #1c2c26, var(--panel-2)); }
+.generation-summary-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; margin: 0; }
+.generation-summary-list > div { min-width: 0; }
+.generation-summary-list dd { margin: 2px 0 0; overflow-wrap: anywhere; }
+.generation-result-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.generation-result-job-label, .generation-copy-status { color: var(--muted); font-size: 12px; }
+.generation-job-id { max-width: min(100%, 360px); padding: 3px 6px; border-radius: 5px; background: #10151b; color: var(--text); overflow-wrap: anywhere; word-break: break-word; }
+.generation-result-link { text-decoration: none; }
 
 label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
 input, select {
@@ -256,6 +274,16 @@ dd { margin: 2px 0 0; overflow-wrap: anywhere; }
 
 @media (max-width: 560px) {
   .generation-grid { grid-template-columns: 1fr; }
+  .generation-auth input { min-width: 0; max-width: 100%; }
+  .generation-actions { align-items: stretch; flex-direction: column; }
+  .generation-actions .button { width: 100%; }
+  .generation-summary-list { grid-template-columns: 1fr; }
+  .generation-result-head { align-items: stretch; flex-direction: column; }
+  .generation-result-head .button { width: 100%; }
+  .generation-job-id { max-width: 100%; }
+  .generation-reference-selection { align-items: stretch; flex-wrap: wrap; }
+  .generation-reference-selection span { flex: 1 1 180px; }
+  .generation-reference-selection .button { width: 100%; }
   .topbar { align-items: flex-start; flex-direction: column; padding: 18px 13px; }
   .top-actions { width: 100%; justify-content: space-between; }
   .root-label { max-width: 75%; }

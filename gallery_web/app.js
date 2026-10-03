@@ -25,6 +25,9 @@
       jobId: "",
       pollTimer: null,
       submitting: false,
+      lastRequest: null,
+      lastOutput: null,
+      reference: { imageId: "", fileName: "", previewUrl: "" },
       tracking: GenerationPollGuard.create(),
       auth: {
         required: false,
@@ -52,6 +55,148 @@
     const element = $("#generation-status");
     element.textContent = text || "";
     element.classList.toggle("error", error);
+  }
+
+  function generationOptionLabel(selector) {
+    const select = $(selector);
+    if (!select) return "";
+    return select.selectedOptions?.[0]?.textContent?.trim() || select.value || "";
+  }
+
+  function generationSummaryLoras(loras = null) {
+    const values = loras || ["character", "style", "additional"].flatMap((type) => {
+      const select = $(`#generation-${type}-lora`);
+      const input = $(`#generation-${type}-strength`);
+      if (!select?.value) return [];
+      const strength = Number(input?.value);
+      return [{ key: select.value, lora_type: type, strength: Number.isFinite(strength) ? strength : "?" }];
+    });
+    return values.map((item) => {
+      const entries = state.generation.options?.loras?.[item.lora_type] || [];
+      const entry = entries.find((candidate) => candidate.key === item.key);
+      const label = entry?.display_name || entry?.label || item.key;
+      return `${label} / ${item.strength}`;
+    });
+  }
+
+  function renderGenerationSummaryRows(selector, rows) {
+    const container = $(selector);
+    if (!container) return;
+    container.replaceChildren();
+    for (const [label, value] of rows) {
+      if (value == null || value === "") continue;
+      const block = document.createElement("div");
+      const term = document.createElement("dt");
+      const description = document.createElement("dd");
+      term.textContent = label;
+      description.textContent = String(value);
+      block.append(term, description);
+      container.appendChild(block);
+    }
+  }
+
+  function renderGenerationRequestSummary() {
+    const container = $("#generation-request-summary");
+    if (!container) return;
+    const count = Number($("#generation-count")?.value || 1);
+    const variation = count > 1 ? generationOptionLabel("#generation-variation") : "Off";
+    const characterPreset = generationOptionLabel("#generation-character-preset");
+    const freeform = $("#generation-freeform-character")?.value.trim() || "";
+    const character = [characterPreset && characterPreset !== "なし" ? characterPreset : "", freeform].filter(Boolean).join(" / ");
+    const mode = generationReferenceMode();
+    const loras = generationSummaryLoras();
+    const reference = mode === "none"
+      ? "None"
+      : `${mode === "pose" ? "Pose" : "Composition"}${state.generation.reference.fileName ? ` / ${state.generation.reference.fileName}` : ""}${mode === "pose" ? ` / ${generationOptionLabel("#generation-reference-fit")}` : ""}`;
+    const rows = [
+      ["Character / Subject", character],
+      ["Tags", generationTags($("#generation-explicit-tags")?.value).join(", ")],
+      ["Appearance", $("#generation-appearance")?.value.trim() || ""],
+      ["Request", $("#generation-request")?.value.trim() || ""],
+      ["Model", generationOptionLabel("#generation-model")],
+      ["Rating", generationOptionLabel("#generation-rating")],
+      ["Count / Variation", `${count} / ${variation}`],
+      ["LoRA", loras.join(", ")],
+      ["Reference", reference],
+    ];
+    renderGenerationSummaryRows("#generation-request-summary-list", rows);
+    container.hidden = false;
+  }
+
+  function generationResultUrl(jobId) {
+    const url = new URL(window.location.href);
+    url.search = "";
+    url.searchParams.set("job_id", jobId);
+    url.hash = "";
+    return `${url.pathname}${url.search}`;
+  }
+
+  function renderGenerationResultSummary(data, jobId) {
+    const container = $("#generation-result-summary");
+    const output = data?.output || {};
+    const request = state.generation.lastRequest || {};
+    const total = Number(data?.total_count ?? output.total_count ?? request.count ?? output.image_count ?? 1);
+    const completed = Number(data?.completed_count ?? output.completed_count ?? output.image_count ?? 0);
+    const failed = Number(data?.failed_count ?? output.failed_count ?? 0);
+    const stateLabel = data?.state === "failed" ? "Failed" : "Completed";
+    const progressLabel = total > 1 ? `${stateLabel} ${completed} / ${total}${failed ? ` / Failed ${failed}` : ""}` : stateLabel;
+    const actualSeeds = Array.isArray(output.actual_seeds)
+      ? output.actual_seeds
+      : Array.isArray(data?.actual_seeds) ? data.actual_seeds
+        : output.actual_seed != null ? [output.actual_seed]
+          : data?.actual_seed != null ? [data.actual_seed] : [];
+    const imageSeeds = Array.isArray(output.images) ? output.images.map((image) => image?.seed).filter((seed) => seed != null) : [];
+    const seeds = [...(actualSeeds.length ? actualSeeds : imageSeeds)].map((seed) => String(seed));
+    const loras = generationSummaryLoras(request.loras || []);
+    const mode = request.reference_mode || "none";
+    const reference = mode === "none" ? "None" : (mode === "pose" ? "Pose" : "Composition");
+    $("#generation-result-state").textContent = progressLabel;
+    $("#generation-result-job-id").textContent = jobId;
+    $("#generation-result-link").href = generationResultUrl(jobId);
+    $("#generation-result-link").hidden = false;
+    renderGenerationSummaryRows("#generation-result-details", [
+      ["枚数", `${completed} / ${total}`],
+      ["actual seed", seeds.join(", ")],
+      ["Model", request.model_key || ""],
+      ["Rating", request.rating || ""],
+      ["LoRA", loras.join(", ")],
+      ["Reference", reference],
+      ["Count / Variation", `${request.count || total} / ${request.variation || "off"}`],
+    ]);
+    $("#generation-copy-status").textContent = "";
+    container.hidden = false;
+  }
+
+  function hideGenerationResultSummary() {
+    const container = $("#generation-result-summary");
+    if (container) container.hidden = true;
+    const status = $("#generation-copy-status");
+    if (status) status.textContent = "";
+  }
+
+  async function copyGenerationJobId() {
+    const jobId = state.generation.jobId.trim();
+    const status = $("#generation-copy-status");
+    if (!jobId || !status) return;
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+        await navigator.clipboard.writeText(jobId);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = jobId;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        const copied = document.execCommand("copy");
+        textarea.remove();
+        if (!copied) throw new Error("clipboard unavailable");
+      }
+      status.textContent = "コピーしました";
+    } catch (_error) {
+      status.textContent = "コピーできません。job_idを長押しして選択してください。";
+    }
   }
 
   function updateGenerationAuthUi() {
@@ -151,6 +296,7 @@
     capability.textContent = "生成可能（この端末）";
     capability.classList.add("ready");
     updateGenerationAuthUi();
+    renderGenerationRequestSummary();
   }
 
   async function loadGenerationAuthStatus() {
@@ -267,6 +413,46 @@
     return $("#generation-reference-mode").value || "none";
   }
 
+  function renderGenerationReferenceSelection() {
+    const selection = $("#generation-reference-selection");
+    const preview = $("#generation-reference-preview");
+    const text = $("#generation-reference-selection-text");
+    if (!selection || !preview || !text) return;
+    const reference = state.generation.reference;
+    selection.hidden = !reference.fileName;
+    text.textContent = reference.fileName ? `Reference image selected: ${reference.fileName}` : "";
+    if (reference.previewUrl) {
+      preview.src = reference.previewUrl;
+      preview.hidden = false;
+    } else {
+      preview.removeAttribute("src");
+      preview.hidden = true;
+    }
+  }
+
+  function clearGenerationReferenceSelection() {
+    const reference = state.generation.reference;
+    if (reference.previewUrl && typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(reference.previewUrl);
+    state.generation.reference = { imageId: "", fileName: "", previewUrl: "" };
+    const fileInput = $("#generation-reference-file");
+    if (fileInput) fileInput.value = "";
+    renderGenerationReferenceSelection();
+    renderGenerationRequestSummary();
+  }
+
+  function handleGenerationReferenceFileChange() {
+    const file = $("#generation-reference-file")?.files?.[0];
+    const previousUrl = state.generation.reference.previewUrl;
+    if (previousUrl && typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(previousUrl);
+    state.generation.reference = {
+      imageId: "",
+      fileName: file?.name || "",
+      previewUrl: file && typeof URL.createObjectURL === "function" ? URL.createObjectURL(file) : "",
+    };
+    renderGenerationReferenceSelection();
+    renderGenerationRequestSummary();
+  }
+
   function updateGenerationReferenceState() {
     const mode = generationReferenceMode();
     const enabled = mode !== "none";
@@ -277,7 +463,21 @@
     $("#generation-reference-fit").disabled = mode !== "pose";
     const defaults = state.generation.options?.reference?.default_strengths || {};
     if (enabled && defaults[mode] != null) $("#generation-reference-strength").value = defaults[mode];
-    if (!enabled) $("#generation-reference-file").value = "";
+    const hint = $("#generation-reference-mode-hint");
+    const help = $("#generation-reference-help");
+    if (mode === "none") {
+      if ($("#generation-reference-file").value || state.generation.reference.fileName) clearGenerationReferenceSelection();
+      if (hint) hint.textContent = "Referenceなし";
+      if (help) help.textContent = "Composition または Pose を選ぶと画像を指定できます。";
+    } else if (mode === "composition") {
+      if (hint) hint.textContent = "Composition referenceを使用中";
+      if (help) help.textContent = "画像を指定してください。Compositionではfit modeは使用しません。";
+    } else {
+      if (hint) hint.textContent = "Pose referenceを使用中";
+      if (help) help.textContent = "画像を指定し、必要に応じてfit modeを選択してください。";
+    }
+    renderGenerationReferenceSelection();
+    renderGenerationRequestSummary();
   }
 
   async function uploadGenerationReference() {
@@ -300,6 +500,9 @@
     if (!response.ok || data.ok === false || !data.reference_image_id) {
       throw new Error(data.error || "参考画像を登録できません。");
     }
+    state.generation.reference.imageId = data.reference_image_id;
+    state.generation.reference.fileName = file.name;
+    renderGenerationReferenceSelection();
     return data.reference_image_id;
   }
 
@@ -332,6 +535,7 @@
     const variation = $("#generation-variation");
     variation.disabled = count <= 1;
     if (count <= 1) variation.value = "off";
+    renderGenerationRequestSummary();
   }
 
   function stopGenerationPolling() {
@@ -369,12 +573,16 @@
       const counts = data.total_count > 1
         ? ` / ${data.completed_count || 0}/${data.total_count}完了${data.failed_count ? ` / 失敗${data.failed_count}` : ""}`
         : "";
-      setGenerationStatus(`${data.state || "unknown"}${progress}${stage}${counts} / job_id=${jobId}`);
+      const stateLabel = { queued: "Queued", resolving: "Resolving", generating: "Generating", completed: "Completed", failed: "Failed" }[data.state] || data.state || "Unknown";
+      const visibleCounts = data.total_count > 1 ? ` ${data.completed_count || 0} / ${data.total_count}` : "";
+      setGenerationStatus(`${stateLabel}${visibleCounts}${progress}${stage}${counts} / job_id=${jobId}`);
+      state.generation.lastOutput = data;
       if (data.state === "completed") {
         stopGenerationPolling();
         state.generation.submitting = false;
         $("#generation-submit").disabled = false;
         $("#job-filter").value = jobId;
+        renderGenerationResultSummary(data, jobId);
         setMessage("生成が完了しました。Galleryを同期しています。");
         await load({
           page: 1,
@@ -386,6 +594,7 @@
         stopGenerationPolling();
         state.generation.submitting = false;
         $("#generation-submit").disabled = false;
+        renderGenerationResultSummary(data, jobId);
         setGenerationStatus(`${data.state} / ${data.error_summary || "生成に失敗しました。"} / job_id=${jobId}`, true);
         return;
       }
@@ -406,17 +615,21 @@
       return;
     }
     invalidateGenerationTracking();
+    hideGenerationResultSummary();
     state.generation.submitting = true;
     $("#generation-submit").disabled = true;
+    renderGenerationRequestSummary();
     setGenerationStatus("送信中…");
     try {
       const referenceMode = generationReferenceMode();
       if (referenceMode !== "none") setGenerationStatus("参考画像を登録中…");
       const referenceImageId = await uploadGenerationReference();
+      const payload = generationPayload(referenceImageId);
+      state.generation.lastRequest = payload;
       const response = await fetch("/api/generation/jobs", {
         method: "POST",
         headers: generationMutationHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify(generationPayload(referenceImageId)),
+        body: JSON.stringify(payload),
       });
       const data = await response.json();
       if (!response.ok || data.ok === false) throw new Error(data.error || "生成を開始できません。");
@@ -1106,6 +1319,13 @@
     $("#generation-auth-logout").addEventListener("click", logoutGeneration);
     $("#generation-count").addEventListener("change", updateGenerationVariationState);
     $("#generation-reference-mode").addEventListener("change", updateGenerationReferenceState);
+    $("#generation-reference-file").addEventListener("change", handleGenerationReferenceFileChange);
+    $("#generation-reference-clear").addEventListener("click", clearGenerationReferenceSelection);
+    $("#generation-copy-job-id").addEventListener("click", copyGenerationJobId);
+    for (const input of document.querySelectorAll("#generation-panel input:not([type='file']), #generation-panel select, #generation-panel textarea")) {
+      input.addEventListener("input", renderGenerationRequestSummary);
+      input.addEventListener("change", renderGenerationRequestSummary);
+    }
     updateGenerationReferenceState();
     updateGenerationVariationState();
     loadGenerationAuthStatus();
