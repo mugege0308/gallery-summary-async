@@ -133,6 +133,26 @@
           <textarea id="generation-explicit-tags" rows="2" placeholder="portrait, upper body"></textarea>
           <small class="generation-field-help">Danbooruなどで調べたタグを入力。例: smile, looking at viewer, hands on cheeks</small>
         </label>
+        <div class="generation-tag-search">
+          <button id="generation-tag-search-toggle" class="button secondary" type="button" aria-expanded="false">タグを探す</button>
+          <section id="generation-tag-search-panel" class="generation-tag-search-panel" hidden aria-label="タグ検索">
+            <label>タグ検索
+              <input id="generation-tag-search-query" type="search" maxlength="200" placeholder="smile / 笑顔">
+            </label>
+            <div class="generation-tag-search-toolbar">
+              <button id="generation-tag-search-submit" class="button secondary" type="button">検索</button>
+              <span id="generation-tag-search-status" class="generation-tag-search-status" role="status"></span>
+            </div>
+            <p id="generation-tag-search-warning" class="generation-tag-search-warning" role="status" hidden></p>
+            <div id="generation-tag-search-results" class="generation-tag-search-results" role="group" aria-label="タグ候補"></div>
+            <div id="generation-tag-search-selected" class="generation-tag-search-selected" aria-live="polite"></div>
+            <div class="generation-tag-search-actions">
+              <button id="generation-tag-search-add" class="button primary" type="button" disabled>追加タグに入れる</button>
+              <button id="generation-tag-search-copy" class="button secondary" type="button" disabled>コピー</button>
+              <button id="generation-tag-search-clear" class="button secondary" type="button" disabled>選択解除</button>
+            </div>
+          </section>
+        </div>
         <label>見た目
           <textarea id="generation-appearance" rows="2" placeholder="銀髪のボブ、青い目"></textarea>
           <small class="generation-field-help">髪色・目の色・服装など。日本語でも入力できます。</small>

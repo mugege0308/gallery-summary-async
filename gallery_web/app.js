@@ -35,6 +35,7 @@
       lastRequest: null,
       lastOutput: null,
       reference: { imageId: "", fileName: "", previewUrl: "", source: "" },
+      tagSearch: { selected: [], results: [], query: "", warning: "" },
       restoreWarnings: [],
       tracking: GenerationPollGuard.create(),
       auth: {
@@ -205,25 +206,31 @@
     if (status) status.textContent = "";
   }
 
+  async function copyTextWithFallback(value) {
+    const text = String(value || "").trim();
+    if (!text) throw new Error("empty clipboard value");
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand("copy");
+    textarea.remove();
+    if (!copied) throw new Error("clipboard unavailable");
+  }
+
   async function copyGenerationJobId() {
     const jobId = state.generation.jobId.trim();
     const status = $("#generation-copy-status");
     if (!jobId || !status) return;
     try {
-      if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
-        await navigator.clipboard.writeText(jobId);
-      } else {
-        const textarea = document.createElement("textarea");
-        textarea.value = jobId;
-        textarea.setAttribute("readonly", "");
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
-        document.body.appendChild(textarea);
-        textarea.select();
-        const copied = document.execCommand("copy");
-        textarea.remove();
-        if (!copied) throw new Error("clipboard unavailable");
-      }
+      await copyTextWithFallback(jobId);
       status.textContent = "コピーしました";
     } catch (_error) {
       status.textContent = "コピーできません。job_idを長押しして選択してください。";
@@ -893,6 +900,135 @@
 
   function generationTags(value) {
     return String(value || "").split(/[,\n]/).map((item) => item.trim()).filter(Boolean);
+  }
+
+  function normalizeGenerationTag(value) {
+    return String(value || "").trim().replace(/[\s-]+/g, "_").toLowerCase();
+  }
+
+  function renderTagSearch() {
+    const search = state.generation.tagSearch;
+    const results = $("#generation-tag-search-results");
+    const selected = $("#generation-tag-search-selected");
+    const warning = $("#generation-tag-search-warning");
+    const status = $("#generation-tag-search-status");
+    if (!results || !selected || !warning || !status) return;
+    results.replaceChildren();
+    for (const candidate of search.results) {
+      const tag = String(candidate?.tag || "").trim();
+      if (!tag) continue;
+      const label = document.createElement("label");
+      label.className = "generation-tag-result";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = search.selected.some((item) => normalizeGenerationTag(item) === normalizeGenerationTag(tag));
+      checkbox.addEventListener("change", () => toggleGenerationTagSelection(tag));
+      const text = document.createElement("span");
+      text.textContent = tag;
+      const meta = document.createElement("small");
+      const category = String(candidate.category || "general");
+      const posts = Number(candidate.post_count);
+      meta.textContent = `${category}${Number.isFinite(posts) ? ` / ${posts.toLocaleString()} posts` : ""}`;
+      label.append(checkbox, text, meta);
+      results.appendChild(label);
+    }
+    if (search.selected.length) {
+      for (const tag of search.selected) {
+        const chip = document.createElement("span");
+        chip.className = "generation-tag-chip";
+        chip.textContent = tag;
+        selected.appendChild(chip);
+      }
+    } else {
+      selected.textContent = search.results.length ? "候補を選択してください。" : "";
+    }
+    warning.textContent = search.warning;
+    warning.hidden = !search.warning;
+    status.textContent = search.query && !search.results.length && !search.warning ? "候補がありません。" : (search.query ? `${search.results.length}件` : "");
+    $("#generation-tag-search-add").disabled = search.selected.length === 0;
+    $("#generation-tag-search-copy").disabled = search.selected.length === 0;
+    $("#generation-tag-search-clear").disabled = search.selected.length === 0;
+  }
+
+  function toggleGenerationTagSearch() {
+    const button = $("#generation-tag-search-toggle");
+    const panel = $("#generation-tag-search-panel");
+    if (!button || !panel) return;
+    const open = panel.hidden;
+    panel.hidden = !open;
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) $("#generation-tag-search-query")?.focus();
+  }
+
+  function toggleGenerationTagSelection(tag) {
+    const search = state.generation.tagSearch;
+    const key = normalizeGenerationTag(tag);
+    const index = search.selected.findIndex((item) => normalizeGenerationTag(item) === key);
+    if (index >= 0) search.selected.splice(index, 1);
+    else search.selected.push(tag);
+    renderTagSearch();
+  }
+
+  async function searchGenerationTags() {
+    const input = $("#generation-tag-search-query");
+    const button = $("#generation-tag-search-submit");
+    const query = input?.value.trim() || "";
+    if (!query) {
+      state.generation.tagSearch = { ...state.generation.tagSearch, query: "", results: [], warning: "検索語を入力してください。" };
+      renderTagSearch();
+      return;
+    }
+    if (button) button.disabled = true;
+    state.generation.tagSearch = { ...state.generation.tagSearch, query, results: [], warning: "" };
+    renderTagSearch();
+    try {
+      const response = await fetch(`/api/generation/tags/search?q=${encodeURIComponent(query)}&limit=20`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "タグ検索に失敗しました。");
+      state.generation.tagSearch = {
+        ...state.generation.tagSearch,
+        results: Array.isArray(data.results) ? data.results : [],
+        warning: typeof data.warning === "string" ? data.warning : "",
+      };
+    } catch (error) {
+      state.generation.tagSearch = { ...state.generation.tagSearch, results: [], warning: error.message || "タグ検索に失敗しました。" };
+    } finally {
+      if (button) button.disabled = false;
+      renderTagSearch();
+    }
+  }
+
+  function addSelectedGenerationTags() {
+    const textarea = $("#generation-explicit-tags");
+    if (!textarea) return;
+    const merged = generationTags(textarea.value);
+    const existing = new Set(merged.map(normalizeGenerationTag));
+    for (const tag of state.generation.tagSearch.selected) {
+      const key = normalizeGenerationTag(tag);
+      if (key && !existing.has(key)) {
+        merged.push(tag);
+        existing.add(key);
+      }
+    }
+    textarea.value = merged.join(", ");
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    renderGenerationRequestSummary();
+    setGenerationStatus("選択したタグを追加タグへ反映しました。");
+  }
+
+  async function copySelectedGenerationTags() {
+    const status = $("#generation-tag-search-status");
+    try {
+      await copyTextWithFallback(state.generation.tagSearch.selected.join(", "));
+      if (status) status.textContent = "コピーしました";
+    } catch (_error) {
+      if (status) status.textContent = "コピーできません。タグを長押しして選択してください。";
+    }
+  }
+
+  function clearGenerationTagSelection() {
+    state.generation.tagSearch = { ...state.generation.tagSearch, selected: [] };
+    renderTagSearch();
   }
 
   function generationLoras() {
@@ -2082,6 +2218,17 @@
     $("#generation-reference-file").addEventListener("change", handleGenerationReferenceFileChange);
     $("#generation-reference-clear").addEventListener("click", clearGenerationReferenceSelection);
     $("#generation-copy-job-id").addEventListener("click", copyGenerationJobId);
+    $("#generation-tag-search-toggle").addEventListener("click", toggleGenerationTagSearch);
+    $("#generation-tag-search-submit").addEventListener("click", searchGenerationTags);
+    $("#generation-tag-search-add").addEventListener("click", addSelectedGenerationTags);
+    $("#generation-tag-search-copy").addEventListener("click", copySelectedGenerationTags);
+    $("#generation-tag-search-clear").addEventListener("click", clearGenerationTagSelection);
+    $("#generation-tag-search-query").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        searchGenerationTags();
+      }
+    });
     $("#comparison-open").addEventListener("click", openComparison);
     $("#comparison-clear").addEventListener("click", clearComparison);
     $("#comparison-diff-toggle").addEventListener("click", toggleComparisonDiff);
@@ -2093,6 +2240,7 @@
     }
     updateGenerationReferenceState();
     updateGenerationVariationState();
+    renderTagSearch();
     loadGenerationAuthStatus();
     for (const type of ["character", "style", "additional"]) {
       $(`#generation-${type}-lora`).addEventListener("change", () => {

@@ -10,6 +10,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from urllib.error import HTTPError
+from urllib.parse import parse_qs, urlsplit
 from urllib.request import Request, build_opener, urlopen
 
 import gallery_server
@@ -41,6 +42,22 @@ class FakeGenerationBackendHandler(BaseHTTPRequestHandler):
             return self._json({"job_id": "job-1", "state": "completed", "progress": 1.0, "output": {"image_count": 1}})
         if self.path == "/api/generation/health":
             return self._json({"service_ready": True})
+        if urlsplit(self.path).path == "/api/generation/tags/search":
+            query = parse_qs(urlsplit(self.path).query)
+            return self._json(
+                {
+                    "query": query.get("q", [""])[-1],
+                    "interpreted_terms": [query.get("q", [""])[-1]],
+                    "results": [
+                        {
+                            "tag": "smile",
+                            "category": "general",
+                            "post_count": 100,
+                            "matched_by": "canonical",
+                        }
+                    ],
+                }
+            )
         return self._json({"error": "not found"}, 404)
 
     def do_POST(self) -> None:  # noqa: N802
@@ -130,6 +147,12 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         status, value = self.request("GET", "/api/generation/options")
         self.assertEqual(status, 200)
         self.assertEqual(value["models"][0]["key"], "animagine")
+
+    def test_tag_search_proxy_forwards_only_safe_query(self) -> None:
+        status, value = self.request("GET", "/api/generation/tags/search?q=smile&limit=20")
+        self.assertEqual(status, 200)
+        self.assertEqual("smile", value["results"][0]["tag"])
+        self.assertNotIn("127.0.0.1:8787", json.dumps(value))
 
     def test_localhost_post_forwards_safe_json_and_returns_job(self) -> None:
         payload = {"model_key": "animagine", "count": 1, "loras": []}
@@ -641,6 +664,15 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         css = (root / "gallery_web" / "style.css").read_text(encoding="utf-8")
         self.assertIn('id="generation-submit"', html)
         self.assertIn('id="generation-freeform-character"', html)
+        self.assertIn('id="generation-explicit-tags"', html)
+        self.assertIn('id="generation-tag-search-toggle"', html)
+        self.assertIn('id="generation-tag-search-query"', html)
+        self.assertIn('id="generation-tag-search-submit"', html)
+        self.assertIn('id="generation-tag-search-results"', html)
+        self.assertIn('id="generation-tag-search-selected"', html)
+        self.assertIn('id="generation-tag-search-add"', html)
+        self.assertIn('id="generation-tag-search-copy"', html)
+        self.assertIn('id="generation-tag-search-clear"', html)
         self.assertIn('id="generation-appearance"', html)
         self.assertIn('id="generation-request"', html)
         self.assertIn('id="generation-count"', html)
@@ -690,6 +722,10 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn('/api/generation/jobs', app)
         self.assertIn('/api/generation/references', app)
         self.assertIn('/api/generation/references/from-gallery', app)
+        self.assertIn('/api/generation/tags/search', app)
+        self.assertIn('addSelectedGenerationTags', app)
+        self.assertIn('copySelectedGenerationTags', app)
+        self.assertIn('state.generation.tagSearch', app)
         self.assertIn('/generation-settings', app)
         self.assertIn('restoreDetailGenerationSettings', app)
         self.assertIn('loadDetailActualSeed', app)
@@ -775,6 +811,8 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn('.view-tabs', css)
         self.assertIn('.recent-panel', css)
         self.assertIn('.generation-field-help', css)
+        self.assertIn('.generation-tag-search-panel', css)
+        self.assertIn('.generation-tag-result', css)
         self.assertIn('overflow-wrap: anywhere', css)
         self.assertIn('.comparison-grid', css)
         self.assertIn('.comparison-diff-toolbar', css)
