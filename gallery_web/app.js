@@ -215,7 +215,9 @@
     const container = $("#detail-actual-seed-tools");
     const value = $("#detail-actual-seed");
     const button = $("#detail-use-actual-seed");
+    const regeneration = $(".detail-regeneration-tools");
     if (container) container.hidden = true;
+    if (regeneration) regeneration.hidden = true;
     if (value) value.textContent = "";
     if (button) {
       button.disabled = true;
@@ -243,7 +245,10 @@
     try {
       const response = await fetch(`/api/images/${encodeURIComponent(imageId)}/generation-settings`, { cache: "no-store" });
       const data = await response.json();
-      if (!response.ok || data.ok === false || data.available !== true || state.detailImageId !== imageId) return;
+      if (state.detailImageId !== imageId) return;
+      const regeneration = $(".detail-regeneration-tools");
+      if (regeneration) regeneration.hidden = !response.ok || data.ok === false || data.available !== true;
+      if (!response.ok || data.ok === false || data.available !== true) return;
       const actualSeed = Number(data.settings?.actual_seed);
       if (!Number.isInteger(actualSeed) || actualSeed < 0) return;
       state.detailActualSeed = actualSeed;
@@ -530,20 +535,30 @@
     }
     article.append(metadata);
 
-    const actions = document.createElement("div");
-    actions.className = "comparison-item-actions";
+    const primaryActions = document.createElement("div");
+    primaryActions.className = "comparison-primary-actions";
     if (settings) {
-      actions.append(comparisonActionButton("この設定を使う", async (event) => {
+      primaryActions.append(comparisonActionButton("この設定を使う", async (event) => {
         state.detailImageId = image.id;
         await restoreDetailGenerationSettings(event.currentTarget, image.id);
       }));
+    }
+
+    const secondary = document.createElement("details");
+    secondary.className = "comparison-secondary-actions";
+    const secondarySummary = document.createElement("summary");
+    secondarySummary.textContent = "その他の操作";
+    secondary.append(secondarySummary);
+    const actions = document.createElement("div");
+    actions.className = "comparison-item-actions";
+    if (settings) {
       const actualSeed = Number(settings.actual_seed);
-      actions.append(comparisonActionButton("実seedを使用", () => {
-        if (Number.isInteger(actualSeed) && actualSeed >= 0) {
+      if (Number.isInteger(actualSeed) && actualSeed >= 0) {
+        actions.append(comparisonActionButton("実seedを使用", () => {
           applyActualSeed(actualSeed);
           $("#comparison-dialog")?.close();
-        }
-      }, { disabled: !Number.isInteger(actualSeed) || actualSeed < 0 }));
+        }));
+      }
     }
     actions.append(
       comparisonActionButton("Compositionに使う", async (event) => {
@@ -560,7 +575,9 @@
       }),
       comparisonActionButton("比較から外す", () => toggleComparison(image)),
     );
-    article.append(actions);
+    secondary.append(actions);
+    if (settings) article.append(primaryActions);
+    article.append(secondary);
     return article;
   }
 
@@ -1569,9 +1586,9 @@
         overlayLeft.append(aiBadge);
       }
       const detail = document.createElement("button");
-      detail.className = "detail-icon";
+      detail.className = "detail-icon card-detail-button";
       detail.type = "button";
-      detail.textContent = "ⓘ";
+      detail.textContent = "詳細";
       detail.title = "詳細を開く";
       detail.setAttribute("aria-label", `${image.filename}の詳細を開く`);
       detail.addEventListener("click", (event) => { event.stopPropagation(); openDetail(image); });

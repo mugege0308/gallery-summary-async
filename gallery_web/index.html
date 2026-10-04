@@ -331,11 +331,35 @@
         <div class="wide"><dt>negative prompt</dt><dd id="detail-negative" class="pre-wrap"></dd></div>
         <div class="wide"><dt>caption</dt><dd id="detail-caption" class="pre-wrap"></dd></div>
       </dl>
-      <div class="detail-comparison-tools" aria-label="画像比較">
-        <strong>画像比較</strong>
-        <span id="detail-comparison-status" class="detail-reference-help">この画像を比較対象に追加できます。</span>
-        <button id="detail-toggle-comparison" class="button secondary" type="button">比較に追加</button>
+      <div class="detail-regeneration-tools" aria-label="この画像の設定を再利用" hidden>
+        <strong>再生成</strong>
+        <span class="detail-reference-help">元の入力設定をフォームへ読み込みます。自動では生成しません。</span>
+        <button id="detail-restore-generation-settings" class="button primary" type="button">この設定でもう一度生成</button>
       </div>
+      <details class="detail-secondary-tools">
+        <summary>その他の操作</summary>
+        <div class="detail-secondary-body">
+          <div class="detail-comparison-tools" aria-label="画像比較">
+            <strong>比較</strong>
+            <span id="detail-comparison-status" class="detail-reference-help">この画像を比較対象に追加できます。</span>
+            <button id="detail-toggle-comparison" class="button secondary" type="button">比較に追加</button>
+          </div>
+          <div class="detail-reference-tools" aria-label="この画像を生成Referenceに設定">
+            <strong>Referenceとして使う</strong>
+            <span class="detail-reference-help">Compositionは構図、Poseはポーズの参考として使います。</span>
+            <div class="detail-reference-buttons">
+              <button id="detail-use-composition-reference" class="button secondary" type="button">Compositionに使う</button>
+              <button id="detail-use-pose-reference" class="button secondary" type="button">Poseに使う</button>
+            </div>
+          </div>
+          <div id="detail-actual-seed-tools" class="detail-seed-tools" aria-label="実seedの利用" hidden>
+            <strong>実seed</strong>
+            <span>同じseedを使います。生成結果の完全一致は保証されません。</span>
+            <code id="detail-actual-seed"></code>
+            <button id="detail-use-actual-seed" class="button secondary" type="button">実seedを使用</button>
+          </div>
+        </div>
+      </details>
       <div class="detail-selection-tools" aria-label="画像単位の一括選択">
         <strong>この画像を基準に選択</strong>
         <span id="detail-match-info" class="match-info">件数を確認中…</span>
@@ -345,25 +369,6 @@
           <button id="detail-select-prompt" class="button secondary" type="button">同じpromptをすべて選択</button>
           <button id="detail-select-group" class="button secondary" type="button">同じ生成グループをすべて選択</button>
         </div>
-      </div>
-      <div class="detail-reference-tools" aria-label="この画像を生成Referenceに設定">
-        <strong>この画像を生成Referenceに使う</strong>
-        <span class="detail-reference-help">Gallery内の画像をサーバー側でReference assetへ登録します。</span>
-        <div class="detail-reference-buttons">
-          <button id="detail-use-composition-reference" class="button secondary" type="button">Compositionに使う</button>
-          <button id="detail-use-pose-reference" class="button secondary" type="button">Poseに使う</button>
-        </div>
-      </div>
-      <div class="detail-regeneration-tools" aria-label="この画像の設定を再利用">
-        <strong>生成設定</strong>
-        <span class="detail-reference-help">元の入力設定をフォームへ読み込みます。自動では生成しません。</span>
-        <button id="detail-restore-generation-settings" class="button secondary" type="button">この設定でもう一度生成</button>
-      </div>
-      <div id="detail-actual-seed-tools" class="detail-seed-tools" aria-label="実seedの利用" hidden>
-        <strong>実seed</strong>
-        <span>同じseedを使います。生成結果の完全一致は保証されません。</span>
-        <code id="detail-actual-seed"></code>
-        <button id="detail-use-actual-seed" class="button secondary" type="button">実seedを使用</button>
       </div>
     </div>
   </dialog>
