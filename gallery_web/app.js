@@ -35,7 +35,7 @@
       lastRequest: null,
       lastOutput: null,
       reference: { imageId: "", fileName: "", previewUrl: "", source: "" },
-      tagSearch: { selected: [], results: [], query: "", warning: "" },
+      tagSearch: { selected: [], results: [], query: "", category: "all", warning: "" },
       restoreWarnings: [],
       tracking: GenerationPollGuard.create(),
       auth: {
@@ -912,7 +912,9 @@
     const selected = $("#generation-tag-search-selected");
     const warning = $("#generation-tag-search-warning");
     const status = $("#generation-tag-search-status");
+    const categoryInput = $("#generation-tag-search-category");
     if (!results || !selected || !warning || !status) return;
+    if (categoryInput) categoryInput.value = search.category || "all";
     results.replaceChildren();
     for (const candidate of search.results) {
       const tag = String(candidate?.tag || "").trim();
@@ -928,7 +930,10 @@
       const meta = document.createElement("small");
       const category = String(candidate.category || "general");
       const posts = Number(candidate.post_count);
-      meta.textContent = `${category}${Number.isFinite(posts) ? ` / ${posts.toLocaleString()} posts` : ""}`;
+      const categoryLabels = { general: "一般", character: "キャラクター", copyright: "作品" };
+      const translation = String(candidate.translation_ja || "").trim();
+      const categoryLabel = categoryLabels[category] || category;
+      meta.textContent = `${translation ? `${translation} · ` : ""}${categoryLabel}${Number.isFinite(posts) ? ` / ${posts.toLocaleString()} posts` : ""}`;
       label.append(checkbox, text, meta);
       results.appendChild(label);
     }
@@ -971,18 +976,20 @@
 
   async function searchGenerationTags() {
     const input = $("#generation-tag-search-query");
+    const categoryInput = $("#generation-tag-search-category");
     const button = $("#generation-tag-search-submit");
     const query = input?.value.trim() || "";
+    const category = categoryInput?.value || "all";
     if (!query) {
-      state.generation.tagSearch = { ...state.generation.tagSearch, query: "", results: [], warning: "検索語を入力してください。" };
+      state.generation.tagSearch = { ...state.generation.tagSearch, query: "", category, results: [], warning: "検索語を入力してください。" };
       renderTagSearch();
       return;
     }
     if (button) button.disabled = true;
-    state.generation.tagSearch = { ...state.generation.tagSearch, query, results: [], warning: "" };
+    state.generation.tagSearch = { ...state.generation.tagSearch, query, category, results: [], warning: "" };
     renderTagSearch();
     try {
-      const response = await fetch(`/api/generation/tags/search?q=${encodeURIComponent(query)}&limit=20`, { cache: "no-store" });
+      const response = await fetch(`/api/generation/tags/search?q=${encodeURIComponent(query)}&limit=20&category=${encodeURIComponent(category)}`, { cache: "no-store" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "タグ検索に失敗しました。");
       state.generation.tagSearch = {
@@ -2220,6 +2227,10 @@
     $("#generation-copy-job-id").addEventListener("click", copyGenerationJobId);
     $("#generation-tag-search-toggle").addEventListener("click", toggleGenerationTagSearch);
     $("#generation-tag-search-submit").addEventListener("click", searchGenerationTags);
+    $("#generation-tag-search-category").addEventListener("change", () => {
+      state.generation.tagSearch = { ...state.generation.tagSearch, category: $("#generation-tag-search-category").value, results: [], warning: "" };
+      renderTagSearch();
+    });
     $("#generation-tag-search-add").addEventListener("click", addSelectedGenerationTags);
     $("#generation-tag-search-copy").addEventListener("click", copySelectedGenerationTags);
     $("#generation-tag-search-clear").addEventListener("click", clearGenerationTagSelection);

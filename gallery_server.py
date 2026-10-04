@@ -698,20 +698,23 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
                 return self._proxy_generation_json("GET", path)
             if path == "/api/generation/tags/search":
                 query = parse_qs(parsed.query, keep_blank_values=True)
-                unknown = set(query) - {"q", "limit"}
+                unknown = set(query) - {"q", "limit", "category"}
                 if unknown:
                     return self._send_error_json("タグ検索の指定が不正です。", HTTPStatus.BAD_REQUEST)
                 raw_query = query.get("q", [""])[-1]
                 raw_limit = query.get("limit", ["20"])[-1]
+                raw_category = query.get("category", ["general"])[-1].strip().casefold()
                 try:
                     limit = int(raw_limit or "20")
                 except ValueError:
                     return self._send_error_json("タグ検索のlimitが不正です。", HTTPStatus.BAD_REQUEST)
                 if limit < 1 or limit > 50:
                     return self._send_error_json("タグ検索のlimitが不正です。", HTTPStatus.BAD_REQUEST)
+                if raw_category not in {"all", "general", "character", "copyright"}:
+                    return self._send_error_json("タグ検索のcategoryが不正です。", HTTPStatus.BAD_REQUEST)
                 if len(raw_query) > 200:
                     return self._send_error_json("検索語が長すぎます。", HTTPStatus.BAD_REQUEST)
-                safe_query = urlencode({"q": raw_query, "limit": str(limit)})
+                safe_query = urlencode({"q": raw_query, "limit": str(limit), "category": raw_category})
                 return self._proxy_generation_json("GET", f"{path}?{safe_query}")
             if path == "/api/generation/auth/status":
                 return self._send_json(self._generation_auth_status())

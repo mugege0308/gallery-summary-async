@@ -18,6 +18,7 @@ import gallery_server
 
 class FakeGenerationBackendHandler(BaseHTTPRequestHandler):
     last_payload: dict[str, object] | None = None
+    last_tag_search_query: dict[str, list[str]] | None = None
 
     def _json(self, value: object, status: int = 200) -> None:
         body = json.dumps(value, ensure_ascii=False).encode("utf-8")
@@ -44,9 +45,11 @@ class FakeGenerationBackendHandler(BaseHTTPRequestHandler):
             return self._json({"service_ready": True})
         if urlsplit(self.path).path == "/api/generation/tags/search":
             query = parse_qs(urlsplit(self.path).query)
+            FakeGenerationBackendHandler.last_tag_search_query = query
             return self._json(
                 {
                     "query": query.get("q", [""])[-1],
+                    "category": query.get("category", ["general"])[-1],
                     "interpreted_terms": [query.get("q", [""])[-1]],
                     "results": [
                         {
@@ -54,6 +57,7 @@ class FakeGenerationBackendHandler(BaseHTTPRequestHandler):
                             "category": "general",
                             "post_count": 100,
                             "matched_by": "canonical",
+                            "translation_ja": "笑顔",
                         }
                     ],
                 }
@@ -152,7 +156,20 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         status, value = self.request("GET", "/api/generation/tags/search?q=smile&limit=20")
         self.assertEqual(status, 200)
         self.assertEqual("smile", value["results"][0]["tag"])
+        self.assertEqual("笑顔", value["results"][0]["translation_ja"])
+        self.assertEqual("general", value["category"])
         self.assertNotIn("127.0.0.1:8787", json.dumps(value))
+
+    def test_tag_search_proxy_forwards_category(self) -> None:
+        status, value = self.request("GET", "/api/generation/tags/search?q=sanae&category=character")
+        self.assertEqual(status, 200)
+        self.assertEqual("character", value["category"])
+        self.assertEqual("character", FakeGenerationBackendHandler.last_tag_search_query["category"][-1])
+
+    def test_tag_search_proxy_rejects_invalid_category(self) -> None:
+        status, value = self.request("GET", "/api/generation/tags/search?q=sanae&category=artist")
+        self.assertEqual(status, 400)
+        self.assertIn("category", value["error"])
 
     def test_localhost_post_forwards_safe_json_and_returns_job(self) -> None:
         payload = {"model_key": "animagine", "count": 1, "loras": []}
@@ -667,6 +684,7 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn('id="generation-explicit-tags"', html)
         self.assertIn('id="generation-tag-search-toggle"', html)
         self.assertIn('id="generation-tag-search-query"', html)
+        self.assertIn('id="generation-tag-search-category"', html)
         self.assertIn('id="generation-tag-search-submit"', html)
         self.assertIn('id="generation-tag-search-results"', html)
         self.assertIn('id="generation-tag-search-selected"', html)
@@ -723,6 +741,8 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn('/api/generation/references', app)
         self.assertIn('/api/generation/references/from-gallery', app)
         self.assertIn('/api/generation/tags/search', app)
+        self.assertIn('translation_ja', app)
+        self.assertIn('category=${encodeURIComponent(category)}', app)
         self.assertIn('addSelectedGenerationTags', app)
         self.assertIn('copySelectedGenerationTags', app)
         self.assertIn('state.generation.tagSearch', app)
