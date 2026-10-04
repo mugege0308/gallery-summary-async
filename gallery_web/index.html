@@ -183,6 +183,7 @@
         <strong>今回の送信設定</strong>
         <dl id="generation-request-summary-list" class="generation-summary-list"></dl>
       </section>
+      <div id="generation-restore-status" class="generation-restore-status" role="status" hidden></div>
       <section id="generation-result-summary" class="generation-result-summary" hidden aria-live="polite">
         <div class="generation-result-head">
           <strong id="generation-result-state">Completed</strong>
@@ -335,6 +336,11 @@
           <button id="detail-use-composition-reference" class="button secondary" type="button">Compositionに使う</button>
           <button id="detail-use-pose-reference" class="button secondary" type="button">Poseに使う</button>
         </div>
+      </div>
+      <div class="detail-regeneration-tools" aria-label="この画像の設定を再利用">
+        <strong>生成設定</strong>
+        <span class="detail-reference-help">元の入力設定をフォームへ読み込みます。自動では生成しません。</span>
+        <button id="detail-restore-generation-settings" class="button secondary" type="button">この設定でもう一度生成</button>
       </div>
     </div>
   </dialog>

@@ -79,6 +79,8 @@ main { max-width: 1680px; margin: 0 auto; padding: 22px clamp(12px, 3vw, 42px) 4
 .generation-status.error { color: var(--danger); }
 .generation-request-summary, .generation-result-summary { display: grid; gap: 8px; margin-top: 12px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel-2); }
 .generation-request-summary { border-color: #53699e; }
+.generation-restore-status { margin-top: 8px; padding: 9px 12px; border: 1px solid #8d6b2f; border-radius: 8px; color: #f0cf8a; background: rgba(141, 107, 47, .16); white-space: pre-wrap; }
+.generation-restore-status.error { color: #ffb4b4; border-color: #9a4f4f; background: rgba(154, 79, 79, .16); }
 .generation-result-summary { border-color: #3c8b72; background: linear-gradient(135deg, #1c2c26, var(--panel-2)); }
 .generation-summary-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; margin: 0; }
 .generation-summary-list > div { min-width: 0; }
@@ -266,6 +268,8 @@ dd { margin: 2px 0 0; overflow-wrap: anywhere; }
 .detail-reference-help { color: var(--muted); font-size: 12px; }
 .detail-reference-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
 .detail-reference-buttons .button { flex: 1 1 220px; min-height: 42px; }
+.detail-regeneration-tools { grid-column: 1 / -1; display: grid; gap: 8px; padding-top: 14px; border-top: 1px solid var(--line); }
+.detail-regeneration-tools .button { min-height: 42px; }
 
 @media (max-width: 900px) {
   .generation-grid { grid-template-columns: repeat(2, minmax(150px, 1fr)); }

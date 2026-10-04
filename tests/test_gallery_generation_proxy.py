@@ -215,6 +215,126 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertEqual(status, 401)
         self.assertIn("認証", value["error"])
 
+    def test_generation_settings_restore_original_request_fields_only(self) -> None:
+        image_id = "c" * 32
+
+        class SettingsStore:
+            def get(self, requested_id):
+                if requested_id != image_id:
+                    return None
+                return {
+                    "id": image_id,
+                    "filename": "generated.png",
+                    "metadata": {
+                        "source_metadata": {
+                            "sidecar": {
+                                "source": "generation_api",
+                                "character_preset": "character-key",
+                                "freeform_character": "かわいい女の子",
+                                "explicit_tags": ["portrait", "upper body"],
+                                "appearance_text": "黒髪、青い目",
+                                "request_text": "白背景",
+                                "model": "animagine",
+                                "rating": "safe",
+                                "size": {"preset": "square", "width": 1024, "height": 1024},
+                                "count": 4,
+                                "variation": "auto",
+                                "requested_seed": -1,
+                                "actual_seed": 123456,
+                                "seed": 123456,
+                                "loras": [
+                                    {
+                                        "key": "komagome_style_v1",
+                                        "lora_name": r"folder\style.safetensors",
+                                        "lora_type": "style",
+                                        "strength": 0.5,
+                                    }
+                                ],
+                                "reference_mode": "composition",
+                                "reference_image_id": "opaque-reference-123",
+                                "reference_strength": 0.5,
+                                "reference_fit": "contain",
+                                "positive": "must not become a form field",
+                                "negative_prompt": "must not become a form field",
+                            }
+                        }
+                    },
+                }
+
+        self.handler_class.store = SettingsStore()
+        status, value = self.request("GET", f"/api/images/{image_id}/generation-settings")
+        self.assertEqual(status, 200)
+        settings = value["settings"]
+        self.assertEqual("かわいい女の子", settings["freeform_character"])
+        self.assertEqual(["portrait", "upper body"], settings["explicit_tags"])
+        self.assertEqual("-1", str(settings["seed"]))
+        self.assertEqual(4, settings["count"])
+        self.assertEqual("auto", settings["variation"])
+        self.assertEqual("opaque-reference-123", settings["reference"]["image_id"])
+        self.assertEqual([{"key": "komagome_style_v1", "lora_type": "style", "strength": 0.5}], settings["loras"])
+        self.assertNotIn("positive", json.dumps(value))
+        self.assertNotIn("negative_prompt", json.dumps(value))
+        self.assertNotIn("safetensors", json.dumps(value))
+
+    def test_generation_settings_legacy_image_is_graceful(self) -> None:
+        image_id = "d" * 32
+
+        class LegacyStore:
+            def get(self, requested_id):
+                return {"id": requested_id, "filename": "legacy.png", "metadata": {"prompt": "1girl"}}
+
+        self.handler_class.store = LegacyStore()
+        status, value = self.request("GET", f"/api/images/{image_id}/generation-settings")
+        self.assertEqual(status, 200)
+        self.assertFalse(value["available"])
+        self.assertIn("元設定", " ".join(value["warnings"]))
+        self.assertEqual("", value["settings"]["freeform_character"])
+
+    def test_generation_settings_missing_reference_falls_back_safely(self) -> None:
+        image_id = "e" * 32
+
+        class MissingReferenceStore:
+            def get(self, requested_id):
+                return {
+                    "id": requested_id,
+                    "filename": "missing-reference.png",
+                    "metadata": {"source_metadata": {"sidecar": {
+                        "request_text": "portrait",
+                        "reference_mode": "pose",
+                        "reference_image_id": "",
+                    }}},
+                }
+
+        self.handler_class.store = MissingReferenceStore()
+        status, value = self.request("GET", f"/api/images/{image_id}/generation-settings")
+        self.assertEqual(status, 200)
+        self.assertEqual("none", value["settings"]["reference"]["mode"])
+        self.assertTrue(any("Reference" in warning for warning in value["warnings"]))
+
+    def test_generation_settings_uses_gallery_job_count_when_sidecar_omits_it(self) -> None:
+        image_id = "f" * 32
+
+        class BatchStore:
+            def get(self, requested_id):
+                return {
+                    "id": requested_id,
+                    "job_id": "parent-job",
+                    "filename": "variation.png",
+                    "metadata": {"source_metadata": {"sidecar": {
+                        "request_text": "portrait",
+                        "variation": "auto",
+                    }}},
+                }
+
+            def job_summary(self, _job_id):
+                return {"total": 4}
+
+        self.handler_class.store = BatchStore()
+        status, value = self.request("GET", f"/api/images/{image_id}/generation-settings")
+        self.assertEqual(status, 200)
+        self.assertEqual(4, value["settings"]["count"])
+        self.assertEqual("auto", value["settings"]["variation"])
+
     def test_job_status_proxy(self) -> None:
         status, value = self.request("GET", "/api/generation/jobs/job-1")
         self.assertEqual(status, 200)
@@ -530,6 +650,8 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn('id="generation-reference-clear"', html)
         self.assertIn('id="detail-use-composition-reference"', html)
         self.assertIn('id="detail-use-pose-reference"', html)
+        self.assertIn('id="detail-restore-generation-settings"', html)
+        self.assertIn('id="generation-restore-status"', html)
         self.assertIn('id="generation-reference-strength"', html)
         self.assertIn('id="generation-reference-fit"', html)
         self.assertIn('id="generation-request-summary"', html)
@@ -543,6 +665,10 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn('/api/generation/jobs', app)
         self.assertIn('/api/generation/references', app)
         self.assertIn('/api/generation/references/from-gallery', app)
+        self.assertIn('/generation-settings', app)
+        self.assertIn('restoreDetailGenerationSettings', app)
+        self.assertIn('generation-seed', app)
+        self.assertNotIn('positive: $("#generation-positive")', app)
         self.assertIn('/api/generation/auth/session', app)
         self.assertIn('/api/generation/auth/logout', app)
         self.assertIn('/api/generation/auth/status', app)

@@ -28,6 +28,7 @@
       lastRequest: null,
       lastOutput: null,
       reference: { imageId: "", fileName: "", previewUrl: "", source: "" },
+      restoreWarnings: [],
       tracking: GenerationPollGuard.create(),
       auth: {
         required: false,
@@ -199,6 +200,20 @@
     }
   }
 
+  function generationHasReferenceLoraConflict() {
+    if (generationReferenceMode() === "none") return false;
+    return ["character", "style", "additional"].some((type) => Boolean($(`#generation-${type}-lora`)?.value));
+  }
+
+  function renderGenerationRestoreStatus(warnings = []) {
+    const element = $("#generation-restore-status");
+    if (!element) return;
+    const values = Array.isArray(warnings) ? warnings.filter(Boolean) : [];
+    element.textContent = values.join("\n");
+    element.hidden = values.length === 0;
+    element.classList.toggle("error", generationHasReferenceLoraConflict());
+  }
+
   function updateGenerationAuthUi() {
     const auth = state.generation.auth;
     const capability = $("#generation-capability");
@@ -220,7 +235,7 @@
       authLogout.hidden = true;
       if (tokenLabel) tokenLabel.hidden = true;
       if (rememberLabel) rememberLabel.hidden = true;
-      generationSubmit.disabled = Boolean(state.generation.submitting);
+      generationSubmit.disabled = Boolean(state.generation.submitting) || generationHasReferenceLoraConflict();
       return;
     }
     if (auth.authenticated) {
@@ -234,7 +249,7 @@
       authLogout.hidden = false;
       if (tokenLabel) tokenLabel.hidden = true;
       if (rememberLabel) rememberLabel.hidden = true;
-      generationSubmit.disabled = Boolean(state.generation.submitting);
+      generationSubmit.disabled = Boolean(state.generation.submitting) || generationHasReferenceLoraConflict();
     } else {
       capability.textContent = "リモート生成は認証が必要です";
       capability.classList.remove("ready");
@@ -387,9 +402,11 @@
       const data = await response.json();
       if (!response.ok || data.ok === false) throw new Error(data.error || "生成オプションを読み込めません。");
       renderGenerationOptions(data);
+      return data;
     } catch (error) {
       $("#generation-capability").textContent = "生成オプションを取得できません";
       setGenerationStatus(error.message || String(error), true);
+      return null;
     }
   }
 
@@ -439,6 +456,8 @@
     if (fileInput) fileInput.value = "";
     renderGenerationReferenceSelection();
     renderGenerationRequestSummary();
+    renderGenerationRestoreStatus(state.generation.restoreWarnings);
+    updateGenerationAuthUi();
   }
 
   function handleGenerationReferenceFileChange() {
@@ -453,6 +472,105 @@
     };
     renderGenerationReferenceSelection();
     renderGenerationRequestSummary();
+  }
+
+  function restoreGenerationSelect(selector, value, label, warnings) {
+    const select = $(selector);
+    if (!select) return;
+    const normalized = value == null ? "" : String(value);
+    if (!normalized) {
+      select.value = "";
+      return;
+    }
+    const option = [...select.options].find((item) => item.value === normalized);
+    if (option) select.value = normalized;
+    else warnings.push(`${label}「${normalized}」は現在利用できないため、既定値を使用します。`);
+  }
+
+  function restoreGenerationLoras(loras, warnings) {
+    for (const type of ["character", "style", "additional"]) {
+      const select = $(`#generation-${type}-lora`);
+      if (select) select.value = "";
+      updateGenerationLoraDefault(type);
+    }
+    for (const item of Array.isArray(loras) ? loras : []) {
+      const type = item?.lora_type;
+      const key = item?.key;
+      const select = $(`#generation-${type}-lora`);
+      if (!select || !key || !["character", "style", "additional"].includes(type)) continue;
+      if (![...select.options].some((option) => option.value === String(key))) {
+        warnings.push(`LoRA「${key}」は現在利用できないため、スロットを空にしました。`);
+        continue;
+      }
+      select.value = String(key);
+      const strength = Number(item.strength);
+      if (Number.isFinite(strength) && strength >= 0 && strength <= 1) {
+        $(`#generation-${type}-strength`).value = String(strength);
+      }
+    }
+  }
+
+  async function restoreDetailGenerationSettings() {
+    const imageId = state.detailImageId;
+    const button = $("#detail-restore-generation-settings");
+    if (!imageId || !button) return;
+    button.disabled = true;
+    try {
+      const response = await fetch(`/api/images/${encodeURIComponent(imageId)}/generation-settings`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok || data.ok === false) throw new Error(data.error || "生成設定を読み込めません。");
+      if (!state.generation.options && !await loadGenerationOptions()) throw new Error("生成オプションを読み込めません。");
+      const settings = data.settings || {};
+      const warnings = Array.isArray(data.warnings) ? [...data.warnings] : [];
+
+      $("#generation-character-preset").value = "";
+      $("#generation-freeform-character").value = settings.freeform_character || "";
+      $("#generation-explicit-tags").value = Array.isArray(settings.explicit_tags) ? settings.explicit_tags.join(", ") : "";
+      $("#generation-appearance").value = settings.appearance_text || "";
+      $("#generation-request").value = settings.request_text || "";
+      restoreGenerationSelect("#generation-character-preset", settings.character_preset, "Character preset", warnings);
+      restoreGenerationSelect("#generation-model", settings.model_key, "Model", warnings);
+      restoreGenerationSelect("#generation-rating", settings.rating, "Rating", warnings);
+
+      const size = settings.size && typeof settings.size === "object" ? settings.size : {};
+      restoreGenerationSelect("#generation-size", size.preset || settings.size, "Size", warnings);
+      restoreGenerationLoras(settings.loras, warnings);
+
+      const count = Number(settings.count);
+      $("#generation-count").value = [1, 2, 3, 4].includes(count) ? String(count) : "1";
+      updateGenerationVariationState();
+      $("#generation-variation").value = $("#generation-count").value === "1" ? "off" : (settings.variation === "auto" ? "auto" : "off");
+      const seed = Number(settings.seed);
+      $("#generation-seed").value = Number.isInteger(seed) && seed >= -1 ? String(seed) : "-1";
+
+      clearGenerationReferenceSelection();
+      const reference = settings.reference && typeof settings.reference === "object" ? settings.reference : {};
+      if (["composition", "pose"].includes(reference.mode) && reference.image_id) {
+        $("#generation-reference-mode").value = reference.mode;
+        state.generation.reference = {
+          imageId: String(reference.image_id),
+          fileName: "保存済みReference",
+          previewUrl: "",
+          source: "restored",
+        };
+        if (reference.strength != null) $("#generation-reference-strength").value = String(reference.strength);
+        if (["contain", "cover", "stretch"].includes(reference.fit)) $("#generation-reference-fit").value = reference.fit;
+      } else {
+        $("#generation-reference-mode").value = "none";
+      }
+
+      state.generation.restoreWarnings = warnings;
+      updateGenerationReferenceState();
+      renderGenerationRestoreStatus(warnings);
+      renderGenerationRequestSummary();
+      $("#detail-dialog")?.close();
+      $("#generation-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      setMessage(warnings.length ? "設定を読み込みました。一部に確認が必要です。" : "設定を読み込みました。生成前に内容を確認してください。");
+    } catch (error) {
+      setMessage(error.message || String(error), true);
+    } finally {
+      button.disabled = false;
+    }
   }
 
   async function useDetailImageAsReference(mode) {
@@ -519,7 +637,7 @@
   async function uploadGenerationReference() {
     const mode = generationReferenceMode();
     if (mode === "none") return null;
-    if (state.generation.reference.source === "gallery" && state.generation.reference.imageId) {
+    if ((state.generation.reference.source === "gallery" || state.generation.reference.source === "restored") && state.generation.reference.imageId) {
       return state.generation.reference.imageId;
     }
     const file = $("#generation-reference-file").files[0];
@@ -1364,12 +1482,17 @@
     for (const input of document.querySelectorAll("#generation-panel input:not([type='file']), #generation-panel select, #generation-panel textarea")) {
       input.addEventListener("input", renderGenerationRequestSummary);
       input.addEventListener("change", renderGenerationRequestSummary);
+      input.addEventListener("change", updateGenerationAuthUi);
     }
     updateGenerationReferenceState();
     updateGenerationVariationState();
     loadGenerationAuthStatus();
     for (const type of ["character", "style", "additional"]) {
-      $(`#generation-${type}-lora`).addEventListener("change", () => updateGenerationLoraDefault(type));
+      $(`#generation-${type}-lora`).addEventListener("change", () => {
+        updateGenerationLoraDefault(type);
+        updateGenerationAuthUi();
+        renderGenerationRestoreStatus(state.generation.restoreWarnings);
+      });
     }
     for (const button of document.querySelectorAll("[data-page-change]")) {
       button.addEventListener("click", () => {
@@ -1451,6 +1574,7 @@
     $("#detail-select-group").addEventListener("click", () => selectDetailMatch("group"));
     $("#detail-use-composition-reference").addEventListener("click", () => useDetailImageAsReference("composition"));
     $("#detail-use-pose-reference").addEventListener("click", () => useDetailImageAsReference("pose"));
+    $("#detail-restore-generation-settings").addEventListener("click", restoreDetailGenerationSettings);
     $("#detail-dialog").addEventListener("click", (event) => {
       if (event.target === $("#detail-dialog")) $("#detail-dialog").close();
     });

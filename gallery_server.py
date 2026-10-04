@@ -55,6 +55,7 @@ TAILSCALE_IPV6_NETWORK = ipaddress.ip_network("fd7a:115c:a1e0::/48")
 _ABSOLUTE_PATH_RE = re.compile(r"(?:(?:[A-Za-z]:)?[\\/])(?:[^\s,;]+[\\/])+[^\s,;]+")
 _GENERATION_JOB_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _GALLERY_IMAGE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_REFERENCE_ASSET_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 _GENERATION_SESSIONS: dict[str, dict[str, Any]] = {}
 _GENERATION_SESSIONS_LOCK = threading.RLock()
 
@@ -98,6 +99,142 @@ def _generation_auth_token() -> str:
 
 def _generation_session_secret() -> str:
     return os.environ.get(GENERATION_SESSION_SECRET_ENV, "").strip()
+
+
+def _safe_generation_settings(image: dict[str, Any], *, count_fallback: int = 1) -> dict[str, Any]:
+    """Extract only original request fields that are safe to restore in the UI."""
+
+    metadata = image.get("metadata") if isinstance(image, dict) else {}
+    metadata = metadata if isinstance(metadata, dict) else {}
+    source_metadata = metadata.get("source_metadata")
+    source_metadata = source_metadata if isinstance(source_metadata, dict) else {}
+    sidecar = source_metadata.get("sidecar")
+    sidecar = sidecar if isinstance(sidecar, dict) else {}
+    warnings: list[str] = []
+
+    def value(*keys: str, fallback: Any = None) -> Any:
+        for key in keys:
+            if key in sidecar and sidecar[key] not in (None, ""):
+                return sidecar[key]
+        return fallback
+
+    def text(*keys: str, fallback: str = "") -> str:
+        raw = value(*keys, fallback=fallback)
+        return raw.strip() if isinstance(raw, str) else fallback
+
+    explicit_tags = value("explicit_tags", fallback=[])
+    if not isinstance(explicit_tags, list):
+        explicit_tags = []
+    explicit_tags = [item.strip() for item in explicit_tags if isinstance(item, str) and item.strip()]
+
+    raw_loras = value("loras", fallback=[])
+    loras: list[dict[str, Any]] = []
+    if isinstance(raw_loras, list):
+        for item in raw_loras:
+            if not isinstance(item, dict):
+                continue
+            key = item.get("key")
+            lora_type = item.get("lora_type")
+            strength = item.get("strength")
+            if not isinstance(key, str) or not key or lora_type not in {"character", "style", "additional"}:
+                warnings.append("一部のLoRA設定は現在のcatalog形式で復元できません。")
+                continue
+            try:
+                strength = float(strength)
+            except (TypeError, ValueError):
+                warnings.append(f"LoRA「{key}」のstrengthを復元できません。")
+                continue
+            if not 0 <= strength <= 1:
+                warnings.append(f"LoRA「{key}」のstrengthが範囲外です。")
+                continue
+            # Deliberately omit lora_name/display_name: those may contain
+            # ComfyUI paths. The UI can restore only catalog keys.
+            loras.append({"key": key, "lora_type": lora_type, "strength": strength})
+
+    raw_size = value("size", fallback={})
+    size = raw_size if isinstance(raw_size, dict) else {"preset": raw_size if isinstance(raw_size, str) else ""}
+    size = {
+        "preset": str(size.get("preset") or "").strip(),
+        "width": size.get("width") if isinstance(size.get("width"), int) else None,
+        "height": size.get("height") if isinstance(size.get("height"), int) else None,
+    }
+
+    requested_seed = value("requested_seed", fallback=None)
+    if requested_seed is None and "actual_seed" not in sidecar:
+        requested_seed = value("seed", fallback=-1)
+    try:
+        requested_seed = int(requested_seed) if requested_seed is not None else -1
+    except (TypeError, ValueError):
+        requested_seed = -1
+        warnings.append("元のrequested seedを復元できないため、自動seed（-1）を使用します。")
+
+    count = value("count", "variation_count", fallback=count_fallback)
+    try:
+        count = int(count)
+    except (TypeError, ValueError):
+        count = 1
+    if count not in {1, 2, 3, 4}:
+        warnings.append("元の枚数は復元できないため、1枚に戻します。")
+        count = 1
+    variation = value("variation", fallback="off")
+    variation = variation if variation in {"off", "auto"} else "off"
+
+    reference_mode = value("reference_mode", fallback="none")
+    reference_mode = reference_mode if reference_mode in {"none", "composition", "pose"} else "none"
+    reference_id = text("reference_image_id")
+    reference: dict[str, Any] = {"mode": "none"}
+    if reference_mode != "none" and _REFERENCE_ASSET_ID_RE.fullmatch(reference_id or ""):
+        reference = {
+            "mode": reference_mode,
+            "image_id": reference_id,
+            "strength": value("reference_strength", fallback=None),
+            "fit": value("reference_fit", fallback="contain"),
+        }
+    elif reference_mode != "none":
+        warnings.append("元Reference assetが見つからないため、ReferenceはNoneに戻しました。")
+
+    has_request_fields = any(
+        key in sidecar
+        for key in (
+            "character_preset",
+            "freeform_character",
+            "character",
+            "explicit_tags",
+            "appearance_text",
+            "request_text",
+            "model_key",
+            "model",
+            "rating",
+            "loras",
+            "size",
+            "requested_seed",
+            "reference_mode",
+        )
+    )
+    if not has_request_fields:
+        warnings.insert(0, "この画像には再生成用の元設定が保存されていません。")
+
+    return {
+        "ok": True,
+        "available": has_request_fields,
+        "filename": str(image.get("filename") or ""),
+        "warnings": list(dict.fromkeys(warnings)),
+        "settings": {
+            "character_preset": text("character_preset") or None,
+            "freeform_character": text("freeform_character", "character"),
+            "explicit_tags": explicit_tags,
+            "appearance_text": text("appearance_text"),
+            "request_text": text("request_text"),
+            "model_key": text("model_key", "model"),
+            "rating": text("rating"),
+            "size": size,
+            "loras": loras,
+            "count": count,
+            "variation": variation,
+            "seed": requested_seed,
+            "reference": reference,
+        },
+    }
 
 
 def _peer_binding(client_address: str, secret: str) -> str:
@@ -660,6 +797,20 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
                     range_end=query.get("range_end", ""),
                 )
                 return self._send_json({"ok": True, **selected})
+            settings_suffix = "/generation-settings"
+            if path.startswith("/api/images/") and path.endswith(settings_suffix):
+                image_id = unquote(path.removeprefix("/api/images/").removesuffix(settings_suffix))
+                image = self.store.get(image_id)
+                if image is None:
+                    return self._send_error_json("画像が見つかりません。", HTTPStatus.NOT_FOUND)
+                count_fallback = 1
+                job_id = str(image.get("job_id") or "").strip()
+                if job_id:
+                    try:
+                        count_fallback = max(1, int(self.store.job_summary(job_id).get("total") or 1))
+                    except (AttributeError, GalleryError, TypeError, ValueError):
+                        count_fallback = 1
+                return self._send_json(_safe_generation_settings(image, count_fallback=count_fallback))
             if path.startswith("/api/images/"):
                 image_id = unquote(path.removeprefix("/api/images/"))
                 image = self.store.get(image_id)
