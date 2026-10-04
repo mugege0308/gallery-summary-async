@@ -8,6 +8,8 @@
   };
   const state = {
     images: [],
+    recentImages: [],
+    recentTotal: 0,
     selected: new Set(),
     selectionMeta: new Map(),
     pending: new Map(),
@@ -48,8 +50,31 @@
 
   const initialJobId = new URLSearchParams(window.location.search).get("job_id") || "";
   let loadToken = 0;
+  let recentLoadToken = 0;
   let aiPollTimer = null;
   const $ = (selector) => document.querySelector(selector);
+
+  function setView(view, { focus = false } = {}) {
+    for (const section of document.querySelectorAll("[data-view-section]")) {
+      const active = section.dataset.viewSection === view;
+      if (section.dataset.viewSection === "generate") section.hidden = !active;
+      else section.classList.toggle("view-hidden", !active);
+      // A content panel may be state-hidden (for example an empty job
+      // summary or comparison panel) even while its parent view is active.
+      // Keep the accessibility tree aligned with the actual rendered state.
+      const shown = active && !section.hidden;
+      section.setAttribute("aria-hidden", shown ? "false" : "true");
+    }
+    for (const button of document.querySelectorAll("[data-view-target]")) {
+      const active = button.dataset.viewTarget === view;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", active ? "true" : "false");
+    }
+    if (view === "generate") {
+      renderGenerationRequestSummary();
+      if (focus) $("#generation-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
 
   function setMessage(text, error = false) {
     const element = $("#message");
@@ -115,10 +140,10 @@
       ? "None"
       : `${mode === "pose" ? "Pose" : "Composition"}${state.generation.reference.fileName ? ` / ${state.generation.reference.fileName}` : ""}${mode === "pose" ? ` / ${generationOptionLabel("#generation-reference-fit")}` : ""}`;
     const rows = [
-      ["Character / Subject", character],
-      ["Tags", generationTags($("#generation-explicit-tags")?.value).join(", ")],
-      ["Appearance", $("#generation-appearance")?.value.trim() || ""],
-      ["Request", $("#generation-request")?.value.trim() || ""],
+      ["キャラクター / 被写体", character],
+      ["追加タグ", generationTags($("#generation-explicit-tags")?.value).join(", ")],
+      ["見た目", $("#generation-appearance")?.value.trim() || ""],
+      ["内容", $("#generation-request")?.value.trim() || ""],
       ["Model", generationOptionLabel("#generation-model")],
       ["Rating", generationOptionLabel("#generation-rating")],
       ["Count / Variation", `${count} / ${variation}`],
@@ -282,7 +307,7 @@
     seedInput.dispatchEvent(new Event("change", { bubbles: true }));
     renderGenerationRequestSummary();
     $("#detail-dialog")?.close();
-    $("#generation-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setView("generate", { focus: true });
     setMessage(`実seed ${actualSeed} を設定しました。生成前に内容を確認してください。`);
   }
 
@@ -1021,7 +1046,7 @@
       renderGenerationRequestSummary();
       $("#detail-dialog")?.close();
       $("#comparison-dialog")?.close();
-      $("#generation-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      setView("generate", { focus: true });
       setMessage(warnings.length ? "設定を読み込みました。一部に確認が必要です。" : "設定を読み込みました。生成前に内容を確認してください。");
     } catch (error) {
       setMessage(error.message || String(error), true);
@@ -1045,7 +1070,7 @@
       if (!response.ok || data.ok === false || !data.reference_image_id) {
         throw new Error(data.error || "Gallery画像をReferenceに登録できません。");
       }
-      const image = imageOverride || state.images.find((item) => item.id === imageId);
+      const image = imageOverride || state.images.find((item) => item.id === imageId) || state.detailImage;
       $("#generation-reference-mode").value = mode;
       state.generation.reference = {
         imageId: data.reference_image_id,
@@ -1054,7 +1079,7 @@
         source: "gallery",
       };
       updateGenerationReferenceState();
-      $("#generation-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      setView("generate", { focus: true });
       $("#detail-dialog")?.close();
       $("#comparison-dialog")?.close();
       setMessage(`${mode === "pose" ? "Pose" : "Composition"} Referenceに設定しました。`);
@@ -1508,6 +1533,70 @@
     }
   }
 
+  function renderRecent() {
+    const gallery = $("#recent-gallery");
+    const empty = $("#recent-empty");
+    const count = $("#recent-count");
+    if (!gallery || !empty || !count) return;
+    gallery.replaceChildren();
+    const jobId = $("#job-filter")?.value.trim() || "";
+    count.textContent = jobId
+      ? `${state.recentImages.length}件 / job_id絞り込み中`
+      : `最新${state.recentImages.length}件 / 全${state.recentTotal.toLocaleString()}件`;
+    empty.hidden = state.recentImages.length !== 0;
+    for (const image of state.recentImages) {
+      const card = document.createElement("article");
+      card.className = "card recent-card";
+      const imageElement = document.createElement("img");
+      imageElement.className = "card-image";
+      imageElement.src = image.thumbnail_url || image.url;
+      imageElement.alt = image.filename;
+      imageElement.loading = "lazy";
+      imageElement.addEventListener("error", () => {
+        if (imageElement.src !== new URL(image.url, window.location.href).href) imageElement.src = image.url;
+      }, { once: true });
+      card.append(imageElement);
+
+      const overlay = document.createElement("div");
+      overlay.className = "card-overlay";
+      const detail = document.createElement("button");
+      detail.className = "detail-icon card-detail-button";
+      detail.type = "button";
+      detail.textContent = "詳細";
+      detail.title = "詳細を開く";
+      detail.setAttribute("aria-label", `${image.filename}の詳細を開く`);
+      detail.addEventListener("click", (event) => { event.stopPropagation(); openDetail(image); });
+      overlay.append(detail);
+      card.append(overlay);
+
+      const info = document.createElement("div");
+      info.className = "card-info";
+      const name = document.createElement("div");
+      name.className = "card-name";
+      name.textContent = image.filename;
+      const meta = document.createElement("div");
+      meta.className = "card-meta";
+      const character = document.createElement("span");
+      character.textContent = image.character_name || image.dataset_name || "-";
+      character.title = character.textContent;
+      const date = document.createElement("span");
+      date.textContent = (image.generated_at || "").slice(0, 10) || "-";
+      meta.append(character, date);
+      const comparisonButton = document.createElement("button");
+      comparisonButton.type = "button";
+      comparisonButton.className = "button secondary card-compare-button";
+      comparisonButton.textContent = state.comparison.has(image.id) ? "比較から外す" : "比較に追加";
+      comparisonButton.setAttribute("aria-label", `${image.filename}を${state.comparison.has(image.id) ? "比較から外す" : "比較に追加"}`);
+      comparisonButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        toggleComparison(image);
+      });
+      info.append(name, meta, comparisonButton);
+      card.append(info);
+      gallery.append(card);
+    }
+  }
+
   function render() {
     const gallery = $("#gallery");
     gallery.replaceChildren();
@@ -1515,6 +1604,8 @@
     const lastItem = state.total ? Math.min(state.total, firstItem + state.images.length - 1) : 0;
     const rangeText = `全${state.total.toLocaleString()}件中 ${firstItem.toLocaleString()}〜${lastItem.toLocaleString()}件を表示`;
     renderDispersionFilter();
+    updateJobFilterUi();
+    renderRecent();
     $("#result-count").textContent = rangeText;
     $("#empty").hidden = state.images.length !== 0;
     for (const element of document.querySelectorAll("[data-page-range]")) element.textContent = rangeText;
@@ -1803,6 +1894,11 @@
     for (const button of document.querySelectorAll("[data-set-lora]")) button.disabled = state.selected.size === 0;
   }
 
+  function updateJobFilterUi() {
+    const button = $("#clear-job-filter");
+    if (button) button.hidden = !$("#job-filter")?.value.trim();
+  }
+
   function setSelectedStatus(status) {
     for (const id of state.selected) {
       state.pending.set(id, status);
@@ -1855,8 +1951,40 @@
       render();
       loadJobSummary(params.get("job_id") || "", generationGuard);
       loadDispersion(generationGuard);
+      if (requestedPage === 1 && (params.get("sort") || "recent") === "recent") {
+        state.recentImages = state.images.slice(0, 12);
+        state.recentTotal = state.total;
+        renderRecent();
+      } else if (requestedPage === 1 || !state.recentImages.length) {
+        loadRecent(generationGuard);
+      }
     } catch (error) {
       setMessage(error.message || String(error), true);
+    }
+  }
+
+  async function loadRecent(generationGuard = null) {
+    const requestToken = ++recentLoadToken;
+    try {
+      const params = filters();
+      params.set("page", "1");
+      params.set("page_size", "12");
+      params.set("sort", "recent");
+      const response = await fetch(`/api/images?${params}`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "最近の画像を読み込めません。");
+      if (requestToken !== recentLoadToken) return;
+      if (generationGuard && !isCurrentGeneration(generationGuard.jobId, generationGuard.sequence)) return;
+      state.recentImages = data.images || [];
+      state.recentTotal = data.total || 0;
+      renderRecent();
+    } catch (_error) {
+      if (requestToken !== recentLoadToken) return;
+      state.recentImages = [];
+      state.recentTotal = 0;
+      renderRecent();
+      const count = $("#recent-count");
+      if (count) count.textContent = "読み込み失敗";
     }
   }
 
@@ -1942,6 +2070,9 @@
   }
 
   document.addEventListener("DOMContentLoaded", () => {
+    for (const button of document.querySelectorAll("[data-view-target]")) {
+      button.addEventListener("click", () => setView(button.dataset.viewTarget, { focus: button.dataset.viewTarget === "generate" }));
+    }
     $("#refresh").addEventListener("click", () => load({ page: state.page }));
     $("#generation-submit").addEventListener("click", submitGeneration);
     $("#generation-auth-submit").addEventListener("click", unlockGeneration);
@@ -1989,6 +2120,11 @@
       setMessage("未確定の指定を取り消しました。");
     });
     $("#clear-filters").addEventListener("click", clearFilters);
+    $("#clear-job-filter").addEventListener("click", () => {
+      $("#job-filter").value = "";
+      setMessage("全画像を表示しています。");
+      load({ page: 1 });
+    });
     $("#dispersion-refresh").addEventListener("click", loadDispersion);
     $("#dispersion-status").addEventListener("change", loadDispersion);
     $("#dispersion-clear").addEventListener("click", () => {
@@ -2039,11 +2175,11 @@
     });
     $("#close-detail").addEventListener("click", () => $("#detail-dialog").close());
     $("#detail-set-anchor").addEventListener("click", () => {
-      const image = state.images.find((item) => item.id === state.detailImageId);
+      const image = state.detailImage || state.images.find((item) => item.id === state.detailImageId);
       if (image) setRangeAnchor(image);
     });
     $("#detail-select-range").addEventListener("click", () => {
-      const image = state.images.find((item) => item.id === state.detailImageId);
+      const image = state.detailImage || state.images.find((item) => item.id === state.detailImageId);
       if (image) selectRangeTo(image);
     });
     $("#detail-select-prompt").addEventListener("click", () => selectDetailMatch("prompt"));
@@ -2068,6 +2204,7 @@
       input.addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => load({ page: 1 }), 220); });
     }
     $("#job-filter").value = initialJobId;
+    setView("gallery");
     loadGenerationOptions();
     load();
     loadAiStatus();

@@ -19,7 +19,31 @@
   </header>
 
   <main>
-    <section class="filters panel" aria-label="絞り込み">
+    <nav class="view-tabs panel" aria-label="メイン表示">
+      <button id="view-tab-gallery" class="view-tab active" type="button" data-view-target="gallery" aria-selected="true">Gallery</button>
+      <button id="view-tab-generate" class="view-tab" type="button" data-view-target="generate" aria-selected="false">Generate</button>
+    </nav>
+
+    <section id="recent-panel" class="recent-panel panel" data-view-section="gallery" aria-labelledby="recent-title">
+      <div class="section-head">
+        <div>
+          <h2 id="recent-title">最近の生成</h2>
+          <p class="section-note">直近の画像を確認できます。過去画像は「すべての画像」から探せます。</p>
+        </div>
+        <span id="recent-count" class="section-count">読み込み中…</span>
+      </div>
+      <div id="recent-gallery" class="gallery recent-gallery" aria-live="polite"></div>
+      <p id="recent-empty" class="recent-empty" hidden>最近の生成画像はありません。</p>
+    </section>
+
+    <section class="filters panel" data-view-section="gallery" aria-label="すべての画像の絞り込み">
+      <div class="section-head filters-head">
+        <div>
+          <h2>すべての画像</h2>
+          <p class="section-note">過去画像を検索・レビューできます。</p>
+        </div>
+        <button id="clear-job-filter" class="button secondary" type="button" hidden>全画像に戻る</button>
+      </div>
       <label>状態
         <select id="status-filter">
           <option value="">すべて</option>
@@ -66,7 +90,7 @@
       </label>
     </section>
 
-    <section id="comparison-panel" class="comparison-panel panel" aria-live="polite" hidden>
+    <section id="comparison-panel" class="comparison-panel panel" data-view-section="gallery" aria-live="polite" hidden>
       <div>
         <strong>比較対象</strong>
         <span id="comparison-count">0 / 2</span>
@@ -78,7 +102,7 @@
       </div>
     </section>
 
-    <section id="generation-panel" class="generation-panel panel" aria-labelledby="generation-title">
+    <section id="generation-panel" class="generation-panel panel" data-view-section="generate" aria-labelledby="generation-title" hidden>
       <div class="generation-head">
         <div>
           <h2 id="generation-title">画像を生成</h2>
@@ -101,17 +125,21 @@
         <label>キャラクタープリセット
           <select id="generation-character-preset"><option value="">なし</option></select>
         </label>
-        <label>Character / Subject
+        <label>キャラクター / 被写体
           <input id="generation-freeform-character" type="text" placeholder="かわいい女の子">
+          <small class="generation-field-help">登録キャラ名、または「かわいい女の子」など。</small>
         </label>
-        <label>明示タグ（カンマ区切り）
+        <label>追加タグ
           <textarea id="generation-explicit-tags" rows="2" placeholder="portrait, upper body"></textarea>
+          <small class="generation-field-help">Danbooruなどで調べたタグを入力。例: smile, looking at viewer, hands on cheeks</small>
         </label>
-        <label>Appearance
+        <label>見た目
           <textarea id="generation-appearance" rows="2" placeholder="銀髪のボブ、青い目"></textarea>
+          <small class="generation-field-help">髪色・目の色・服装など。日本語でも入力できます。</small>
         </label>
-        <label>Request
+        <label>やりたい内容
           <textarea id="generation-request" rows="2" placeholder="白背景、少し微笑む"></textarea>
+          <small class="generation-field-help">ポーズ・表情・構図・背景などを自然文で指定。</small>
         </label>
         <label>Reference mode
           <select id="generation-reference-mode">
@@ -209,7 +237,7 @@
       </section>
     </section>
 
-    <section id="job-summary" class="job-summary panel" hidden aria-live="polite">
+    <section id="job-summary" class="job-summary panel" data-view-section="gallery" hidden aria-live="polite">
       <strong id="job-summary-title">今回の生成</strong>
       <span><b id="job-summary-total">0</b>枚</span>
       <span>batch <b id="job-summary-batches">0</b></span>
@@ -219,7 +247,7 @@
       <span class="candidate-reject">没候補 <b id="job-summary-reject">0</b></span>
     </section>
 
-    <section id="dispersion-panel" class="dispersion-panel panel" aria-labelledby="dispersion-title">
+    <section id="dispersion-panel" class="dispersion-panel panel" data-view-section="gallery" aria-labelledby="dispersion-title">
       <div class="dispersion-head">
         <div>
           <h2 id="dispersion-title">データセット分散チェック</h2>
@@ -248,7 +276,7 @@
       </div>
     </section>
 
-    <section class="reviewbar panel">
+    <section class="reviewbar panel" data-view-section="gallery">
       <div>
         <strong id="result-count">全0件中 0〜0件を表示</strong>
         <strong id="selection-count" class="selection-summary">選択中 0枚</strong>
@@ -283,7 +311,7 @@
     </section>
 
     <p id="message" class="message" role="status"></p>
-    <nav id="pagination-top" class="pagination pagination-top panel" aria-label="画像一覧ページ（上部）">
+    <nav id="pagination-top" class="pagination pagination-top panel" data-view-section="gallery" aria-label="画像一覧ページ（上部）">
       <span class="pagination-summary" data-page-range>全0件中 0〜0件を表示</span>
       <div class="pagination-controls">
         <button class="button secondary" data-page-change="-1" type="button">前へ</button>
@@ -291,8 +319,8 @@
         <button class="button secondary" data-page-change="1" type="button">次へ</button>
       </div>
     </nav>
-    <section id="gallery" class="gallery" aria-live="polite"></section>
-    <nav id="pagination" class="pagination pagination-bottom panel" aria-label="画像一覧ページ（下部）">
+    <section id="gallery" class="gallery" data-view-section="gallery" aria-live="polite"></section>
+    <nav id="pagination" class="pagination pagination-bottom panel" data-view-section="gallery" aria-label="画像一覧ページ（下部）">
       <span class="pagination-summary" data-page-range>全0件中 0〜0件を表示</span>
       <div class="pagination-controls">
         <button class="button secondary" data-page-change="-1" type="button">前へ</button>
@@ -300,7 +328,7 @@
         <button class="button secondary" data-page-change="1" type="button">次へ</button>
       </div>
     </nav>
-    <div id="empty" class="empty panel" hidden>
+    <div id="empty" class="empty panel" data-view-section="gallery" hidden>
       <p>条件に一致する画像がありません。</p>
       <button id="clear-filters" class="button secondary" type="button">絞り込みを解除</button>
     </div>
