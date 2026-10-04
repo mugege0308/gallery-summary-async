@@ -23,6 +23,7 @@
     detailActualSeed: null,
     comparison: new Map(),
     comparisonRenderToken: 0,
+    comparisonDiffOnly: false,
     aiJob: null,
     generation: {
       options: null,
@@ -340,6 +341,125 @@
     return values.join(" / ") || image.character_name || image.dataset_name || "-";
   }
 
+  function comparisonValue(display, compare = display) {
+    const text = display == null ? "" : String(display).trim();
+    return {
+      display: text || "None",
+      compare: compare == null ? "" : String(compare).trim(),
+    };
+  }
+
+  function comparisonUnavailable() {
+    return { display: "Unavailable", compare: "__unavailable__" };
+  }
+
+  function comparisonTextValue(value) {
+    if (value == null) return comparisonValue("None", "");
+    const display = String(value).trim();
+    if (!display) return comparisonValue("None", "");
+    return comparisonValue(display, display.replace(/\s+/g, " "));
+  }
+
+  function comparisonTagValue(value) {
+    const tags = Array.isArray(value)
+      ? value.map((item) => String(item || "").trim()).filter(Boolean)
+      : [];
+    const compare = [...tags].map((tag) => tag.toLowerCase().replace(/\s+/g, " ")).sort().join("|");
+    return comparisonValue(tags.join(", "), compare);
+  }
+
+  function comparisonSizeValue(settings) {
+    const size = settings?.size;
+    if (!size || typeof size !== "object") return comparisonValue(size);
+    const preset = String(size.preset || "").trim();
+    const width = Number.isInteger(size.width) ? size.width : null;
+    const height = Number.isInteger(size.height) ? size.height : null;
+    const dimensions = width && height ? `${width}x${height}` : "";
+    const display = [preset, dimensions].filter(Boolean).join(" / ");
+    return comparisonValue(display, display.toLowerCase());
+  }
+
+  function comparisonLoraValue(settings, loraType) {
+    const item = Array.isArray(settings?.loras)
+      ? settings.loras.find((candidate) => candidate?.lora_type === loraType)
+      : null;
+    if (!item || !item.key) return comparisonValue("None", "");
+    const key = String(item.key).trim();
+    const strength = item.strength == null ? "" : String(item.strength).trim();
+    const normalizedStrength = strength && Number.isFinite(Number(strength)) ? String(Number(strength)) : strength;
+    return comparisonValue(strength ? `${key} / ${strength}` : key, `${key.toLowerCase()}|${normalizedStrength}`);
+  }
+
+  function comparisonReferenceValue(settings) {
+    if (!settings) return comparisonUnavailable();
+    const reference = settings.reference && typeof settings.reference === "object" ? settings.reference : {};
+    const mode = reference.mode && reference.mode !== "none" ? String(reference.mode) : "none";
+    if (mode === "none") return comparisonValue("None", "none");
+    const strength = reference.strength == null ? "" : String(reference.strength).trim();
+    const fit = reference.fit == null ? "" : String(reference.fit).trim();
+    const display = [mode, strength, fit].filter(Boolean).join(" / ");
+    const normalizedStrength = strength && Number.isFinite(Number(strength)) ? String(Number(strength)) : strength;
+    return comparisonValue(display, `${mode.toLowerCase()}|${normalizedStrength}|${fit.toLowerCase()}`);
+  }
+
+  function comparisonReferenceImageValue(settings) {
+    if (!settings) return comparisonUnavailable();
+    const reference = settings.reference && typeof settings.reference === "object" ? settings.reference : {};
+    const imageId = String(reference.image_id || "").trim();
+    return comparisonValue(imageId ? "Selected" : "None", imageId || "");
+  }
+
+  function comparisonFieldValues(settings) {
+    if (!settings) {
+      return [
+        ["Character preset", comparisonUnavailable()],
+        ["Free-form character", comparisonUnavailable()],
+        ["Explicit tags", comparisonUnavailable()],
+        ["Appearance", comparisonUnavailable()],
+        ["Request", comparisonUnavailable()],
+        ["Model", comparisonUnavailable()],
+        ["Rating", comparisonUnavailable()],
+        ["Size", comparisonUnavailable()],
+        ["Character LoRA", comparisonUnavailable()],
+        ["Style LoRA", comparisonUnavailable()],
+        ["Additional LoRA", comparisonUnavailable()],
+        ["Reference", comparisonUnavailable()],
+        ["Reference image", comparisonUnavailable()],
+        ["Requested seed", comparisonUnavailable()],
+        ["Actual seed", comparisonUnavailable()],
+        ["Count", comparisonUnavailable()],
+        ["Variation", comparisonUnavailable()],
+      ];
+    }
+    return [
+      ["Character preset", comparisonTextValue(settings.character_preset)],
+      ["Free-form character", comparisonTextValue(settings.freeform_character)],
+      ["Explicit tags", comparisonTagValue(settings.explicit_tags)],
+      ["Appearance", comparisonTextValue(settings.appearance_text)],
+      ["Request", comparisonTextValue(settings.request_text)],
+      ["Model", comparisonTextValue(settings.model_key)],
+      ["Rating", comparisonTextValue(settings.rating)],
+      ["Size", comparisonSizeValue(settings)],
+      ["Character LoRA", comparisonLoraValue(settings, "character")],
+      ["Style LoRA", comparisonLoraValue(settings, "style")],
+      ["Additional LoRA", comparisonLoraValue(settings, "additional")],
+      ["Reference", comparisonReferenceValue(settings)],
+      ["Reference image", comparisonReferenceImageValue(settings)],
+      ["Requested seed", settings.seed == null ? comparisonValue("None", "") : comparisonValue(settings.seed)],
+      ["Actual seed", settings.actual_seed == null ? comparisonValue("None", "") : comparisonValue(settings.actual_seed)],
+      ["Count", comparisonValue(settings.count == null ? 1 : settings.count)],
+      ["Variation", comparisonTextValue(settings.variation || "off")],
+    ];
+  }
+
+  function comparisonDiffRows(settingsList) {
+    const fields = comparisonFieldValues(settingsList[0]).map(([label], index) => ({
+      label,
+      values: settingsList.map((settings) => comparisonFieldValues(settings)[index][1]),
+    }));
+    return fields.filter((field) => field.values[0].compare !== field.values[1].compare);
+  }
+
   function comparisonRows(image, settings) {
     const reference = settings?.reference && typeof settings.reference === "object" ? settings.reference : {};
     const mode = reference.mode && reference.mode !== "none" ? reference.mode : "none";
@@ -373,9 +493,15 @@
     return button;
   }
 
-  function renderComparisonItem(image, settings, error = "") {
+  function renderComparisonItem(image, settings, error = "", rowsOverride = null, sideLabel = "") {
     const article = document.createElement("article");
     article.className = "comparison-item";
+    if (sideLabel) {
+      const label = document.createElement("span");
+      label.className = "comparison-side-label";
+      label.textContent = sideLabel;
+      article.append(label);
+    }
     const imageWrap = document.createElement("div");
     imageWrap.className = "comparison-image-wrap";
     const imageElement = document.createElement("img");
@@ -389,7 +515,7 @@
     article.append(heading);
     const metadata = document.createElement("dl");
     metadata.className = "comparison-metadata";
-    for (const [label, value] of comparisonRows(image, settings)) {
+    for (const [label, value] of rowsOverride || comparisonRows(image, settings)) {
       const term = document.createElement("dt");
       const description = document.createElement("dd");
       term.textContent = label;
@@ -443,20 +569,58 @@
     if (!grid) return;
     const token = ++state.comparisonRenderToken;
     grid.replaceChildren();
-    for (const image of comparisonItems()) {
-      const loading = document.createElement("article");
-      loading.className = "comparison-item";
-      loading.textContent = "生成設定を読み込み中…";
-      grid.append(loading);
+    const images = comparisonItems();
+    const entries = await Promise.all(images.map(async (image) => {
       try {
-        const settings = await fetchComparisonSettings(image.id);
-        if (token !== state.comparisonRenderToken || !state.comparison.has(image.id)) return;
-        loading.replaceWith(renderComparisonItem(image, settings));
+        return { image, settings: await fetchComparisonSettings(image.id), error: "" };
       } catch (_error) {
-        if (token !== state.comparisonRenderToken || !state.comparison.has(image.id)) return;
-        loading.replaceWith(renderComparisonItem(image, null, "settings unavailable"));
+        return { image, settings: null, error: "settings unavailable" };
       }
+    }));
+    if (token !== state.comparisonRenderToken || images.some((image) => !state.comparison.has(image.id))) return;
+
+    const hasLegacy = entries.some((entry) => !entry.settings);
+    const allDiffRows = state.comparisonDiffOnly ? comparisonDiffRows(entries.map((entry) => entry.settings)) : [];
+    const diffRows = hasLegacy
+      ? allDiffRows.filter((row) => row.values.every((value) => value.compare !== "__unavailable__"))
+      : allDiffRows;
+    if (state.comparisonDiffOnly) {
+      const summary = document.createElement("p");
+      summary.className = "comparison-diff-summary";
+      summary.textContent = hasLegacy
+        ? "Legacy画像では比較可能な設定が限られます。"
+        : diffRows.length
+        ? `${diffRows.length}項目に差分があります。`
+        : "保存されている生成設定に差分はありません。";
+      grid.append(summary);
     }
+    entries.forEach((entry, index) => {
+      const rows = state.comparisonDiffOnly
+        ? diffRows.map((row) => {
+          let display = row.values[index].display;
+          if (row.label === "Reference image" && row.values[0].compare !== row.values[1].compare && display === "Selected") {
+            display += " (different image)";
+          }
+          return [row.label, display];
+        })
+        : null;
+      grid.append(renderComparisonItem(entry.image, entry.settings, entry.error, rows, index === 0 ? "A" : "B"));
+    });
+  }
+
+  function updateComparisonDiffToggle() {
+    const button = $("#comparison-diff-toggle");
+    const status = $("#comparison-diff-status");
+    if (!button) return;
+    button.textContent = state.comparisonDiffOnly ? "全項目を表示" : "差分のみ表示";
+    button.setAttribute("aria-pressed", state.comparisonDiffOnly ? "true" : "false");
+    if (status) status.textContent = state.comparisonDiffOnly ? "A / Bで異なる設定だけを表示中" : "全項目を表示中";
+  }
+
+  function toggleComparisonDiff() {
+    state.comparisonDiffOnly = !state.comparisonDiffOnly;
+    updateComparisonDiffToggle();
+    renderComparisonView();
   }
 
   function openComparison() {
@@ -466,12 +630,15 @@
     }
     const dialog = $("#comparison-dialog");
     if (typeof dialog.showModal === "function") dialog.showModal(); else dialog.setAttribute("open", "");
+    updateComparisonDiffToggle();
     renderComparisonView();
   }
 
   function clearComparison() {
     state.comparison.clear();
     state.comparisonRenderToken += 1;
+    state.comparisonDiffOnly = false;
+    updateComparisonDiffToggle();
     $("#comparison-dialog")?.close();
     render();
     setMessage("比較対象を解除しました。");
@@ -1769,6 +1936,7 @@
     $("#generation-copy-job-id").addEventListener("click", copyGenerationJobId);
     $("#comparison-open").addEventListener("click", openComparison);
     $("#comparison-clear").addEventListener("click", clearComparison);
+    $("#comparison-diff-toggle").addEventListener("click", toggleComparisonDiff);
     $("#close-comparison").addEventListener("click", () => $("#comparison-dialog").close());
     for (const input of document.querySelectorAll("#generation-panel input:not([type='file']), #generation-panel select, #generation-panel textarea")) {
       input.addEventListener("input", renderGenerationRequestSummary);
