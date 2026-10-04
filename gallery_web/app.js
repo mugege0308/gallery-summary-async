@@ -19,6 +19,7 @@
     lastSelectedId: null,
     rangeAnchorId: null,
     detailImageId: null,
+    detailActualSeed: null,
     aiJob: null,
     generation: {
       options: null,
@@ -203,6 +204,57 @@
   function generationHasReferenceLoraConflict() {
     if (generationReferenceMode() === "none") return false;
     return ["character", "style", "additional"].some((type) => Boolean($(`#generation-${type}-lora`)?.value));
+  }
+
+  function clearDetailActualSeed() {
+    state.detailActualSeed = null;
+    const container = $("#detail-actual-seed-tools");
+    const value = $("#detail-actual-seed");
+    const button = $("#detail-use-actual-seed");
+    if (container) container.hidden = true;
+    if (value) value.textContent = "";
+    if (button) {
+      button.disabled = true;
+      button.dataset.actualSeed = "";
+    }
+  }
+
+  async function loadDetailActualSeed(imageId) {
+    clearDetailActualSeed();
+    try {
+      const response = await fetch(`/api/images/${encodeURIComponent(imageId)}/generation-settings`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok || data.ok === false || data.available !== true || state.detailImageId !== imageId) return;
+      const actualSeed = Number(data.settings?.actual_seed);
+      if (!Number.isInteger(actualSeed) || actualSeed < 0) return;
+      state.detailActualSeed = actualSeed;
+      const container = $("#detail-actual-seed-tools");
+      const value = $("#detail-actual-seed");
+      const button = $("#detail-use-actual-seed");
+      if (value) value.textContent = String(actualSeed);
+      if (button) {
+        button.disabled = false;
+        button.dataset.actualSeed = String(actualSeed);
+      }
+      if (container) container.hidden = false;
+    } catch (_error) {
+      clearDetailActualSeed();
+    }
+  }
+
+  function useDetailActualSeed() {
+    const button = $("#detail-use-actual-seed");
+    const actualSeed = Number(button?.dataset.actualSeed ?? state.detailActualSeed);
+    if (!Number.isInteger(actualSeed) || actualSeed < 0) return;
+    const seedInput = $("#generation-seed");
+    if (!seedInput) return;
+    seedInput.value = String(actualSeed);
+    seedInput.dispatchEvent(new Event("input", { bubbles: true }));
+    seedInput.dispatchEvent(new Event("change", { bubbles: true }));
+    renderGenerationRequestSummary();
+    $("#detail-dialog")?.close();
+    $("#generation-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setMessage(`実seed ${actualSeed} を設定しました。生成前に内容を確認してください。`);
   }
 
   function renderGenerationRestoreStatus(warnings = []) {
@@ -1416,9 +1468,11 @@
     setDetail("#detail-prompt", metadata.prompt);
     setDetail("#detail-negative", metadata.negative_prompt);
     setDetail("#detail-caption", metadata.caption);
+    clearDetailActualSeed();
     const dialog = $("#detail-dialog");
     if (typeof dialog.showModal === "function") dialog.showModal(); else dialog.setAttribute("open", "");
     loadDetailMatchInfo(image);
+    loadDetailActualSeed(image.id);
   }
 
   async function commit() {
@@ -1575,6 +1629,7 @@
     $("#detail-use-composition-reference").addEventListener("click", () => useDetailImageAsReference("composition"));
     $("#detail-use-pose-reference").addEventListener("click", () => useDetailImageAsReference("pose"));
     $("#detail-restore-generation-settings").addEventListener("click", restoreDetailGenerationSettings);
+    $("#detail-use-actual-seed").addEventListener("click", useDetailActualSeed);
     $("#detail-dialog").addEventListener("click", (event) => {
       if (event.target === $("#detail-dialog")) $("#detail-dialog").close();
     });

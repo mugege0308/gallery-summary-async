@@ -168,6 +168,14 @@ def _safe_generation_settings(image: dict[str, Any], *, count_fallback: int = 1)
         requested_seed = -1
         warnings.append("元のrequested seedを復元できないため、自動seed（-1）を使用します。")
 
+    actual_seed = value("actual_seed", fallback=None)
+    try:
+        actual_seed = int(actual_seed) if actual_seed is not None else None
+        if actual_seed is not None and actual_seed < 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        actual_seed = None
+
     count = value("count", "variation_count", fallback=count_fallback)
     try:
         count = int(count)
@@ -232,6 +240,7 @@ def _safe_generation_settings(image: dict[str, Any], *, count_fallback: int = 1)
             "count": count,
             "variation": variation,
             "seed": requested_seed,
+            "actual_seed": actual_seed,
             "reference": reference,
         },
     }

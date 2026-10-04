@@ -268,6 +268,7 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertEqual("かわいい女の子", settings["freeform_character"])
         self.assertEqual(["portrait", "upper body"], settings["explicit_tags"])
         self.assertEqual("-1", str(settings["seed"]))
+        self.assertEqual(123456, settings["actual_seed"])
         self.assertEqual(4, settings["count"])
         self.assertEqual("auto", settings["variation"])
         self.assertEqual("opaque-reference-123", settings["reference"]["image_id"])
@@ -289,6 +290,7 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertFalse(value["available"])
         self.assertIn("元設定", " ".join(value["warnings"]))
         self.assertEqual("", value["settings"]["freeform_character"])
+        self.assertIsNone(value["settings"]["actual_seed"])
 
     def test_generation_settings_missing_reference_falls_back_safely(self) -> None:
         image_id = "e" * 32
@@ -651,6 +653,9 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn('id="detail-use-composition-reference"', html)
         self.assertIn('id="detail-use-pose-reference"', html)
         self.assertIn('id="detail-restore-generation-settings"', html)
+        self.assertIn('id="detail-actual-seed-tools"', html)
+        self.assertIn('id="detail-actual-seed"', html)
+        self.assertIn('id="detail-use-actual-seed"', html)
         self.assertIn('id="generation-restore-status"', html)
         self.assertIn('id="generation-reference-strength"', html)
         self.assertIn('id="generation-reference-fit"', html)
@@ -667,6 +672,11 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn('/api/generation/references/from-gallery', app)
         self.assertIn('/generation-settings', app)
         self.assertIn('restoreDetailGenerationSettings', app)
+        self.assertIn('loadDetailActualSeed', app)
+        self.assertIn('useDetailActualSeed', app)
+        self.assertIn('settings?.actual_seed', app)
+        self.assertIn('data.available !== true', app)
+        self.assertIn('seedInput.value = String(actualSeed)', app)
         self.assertIn('generation-seed', app)
         self.assertNotIn('positive: $("#generation-positive")', app)
         self.assertIn('/api/generation/auth/session', app)
