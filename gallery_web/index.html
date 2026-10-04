@@ -66,6 +66,18 @@
       </label>
     </section>
 
+    <section id="comparison-panel" class="comparison-panel panel" aria-live="polite" hidden>
+      <div>
+        <strong>比較対象</strong>
+        <span id="comparison-count">0 / 2</span>
+        <span id="comparison-hint" class="comparison-hint">画像を2枚追加すると比較できます。</span>
+      </div>
+      <div class="comparison-actions">
+        <button id="comparison-open" class="button primary" type="button" disabled>比較する</button>
+        <button id="comparison-clear" class="button secondary" type="button">比較を解除</button>
+      </div>
+    </section>
+
     <section id="generation-panel" class="generation-panel panel" aria-labelledby="generation-title">
       <div class="generation-head">
         <div>
@@ -319,6 +331,11 @@
         <div class="wide"><dt>negative prompt</dt><dd id="detail-negative" class="pre-wrap"></dd></div>
         <div class="wide"><dt>caption</dt><dd id="detail-caption" class="pre-wrap"></dd></div>
       </dl>
+      <div class="detail-comparison-tools" aria-label="画像比較">
+        <strong>画像比較</strong>
+        <span id="detail-comparison-status" class="detail-reference-help">この画像を比較対象に追加できます。</span>
+        <button id="detail-toggle-comparison" class="button secondary" type="button">比較に追加</button>
+      </div>
       <div class="detail-selection-tools" aria-label="画像単位の一括選択">
         <strong>この画像を基準に選択</strong>
         <span id="detail-match-info" class="match-info">件数を確認中…</span>
@@ -349,6 +366,14 @@
         <button id="detail-use-actual-seed" class="button secondary" type="button">実seedを使用</button>
       </div>
     </div>
+  </dialog>
+
+  <dialog id="comparison-dialog" class="comparison-dialog">
+    <div class="detail-head">
+      <h2 id="comparison-title">画像比較</h2>
+      <button id="close-comparison" class="close-button" type="button" aria-label="比較を閉じる">×</button>
+    </div>
+    <div id="comparison-grid" class="comparison-grid"></div>
   </dialog>
 
   <script src="/static/generation_poll_guard.js" defer></script>

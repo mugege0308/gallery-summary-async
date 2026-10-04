@@ -19,7 +19,10 @@
     lastSelectedId: null,
     rangeAnchorId: null,
     detailImageId: null,
+    detailImage: null,
     detailActualSeed: null,
+    comparison: new Map(),
+    comparisonRenderToken: 0,
     aiJob: null,
     generation: {
       options: null,
@@ -219,6 +222,21 @@
     }
   }
 
+  function updateDetailComparisonUi() {
+    const button = $("#detail-toggle-comparison");
+    const status = $("#detail-comparison-status");
+    if (!button || !status) return;
+    const selected = Boolean(state.detailImage && state.comparison.has(state.detailImage.id));
+    button.textContent = selected ? "比較から外す" : "比較に追加";
+    status.textContent = selected ? "比較対象に追加済みです。" : "この画像を比較対象に追加できます。";
+  }
+
+  function toggleDetailComparison() {
+    if (!state.detailImage) return;
+    toggleComparison(state.detailImage);
+    updateDetailComparisonUi();
+  }
+
   async function loadDetailActualSeed(imageId) {
     clearDetailActualSeed();
     try {
@@ -246,6 +264,11 @@
     const button = $("#detail-use-actual-seed");
     const actualSeed = Number(button?.dataset.actualSeed ?? state.detailActualSeed);
     if (!Number.isInteger(actualSeed) || actualSeed < 0) return;
+    applyActualSeed(actualSeed);
+  }
+
+  function applyActualSeed(actualSeed) {
+    if (!Number.isInteger(actualSeed) || actualSeed < 0) return;
     const seedInput = $("#generation-seed");
     if (!seedInput) return;
     seedInput.value = String(actualSeed);
@@ -255,6 +278,203 @@
     $("#detail-dialog")?.close();
     $("#generation-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
     setMessage(`実seed ${actualSeed} を設定しました。生成前に内容を確認してください。`);
+  }
+
+  function comparisonItems() {
+    return [...state.comparison.values()];
+  }
+
+  function renderComparisonPanel() {
+    const panel = $("#comparison-panel");
+    const count = $("#comparison-count");
+    const hint = $("#comparison-hint");
+    const open = $("#comparison-open");
+    if (!panel || !count || !hint || !open) return;
+    const total = state.comparison.size;
+    panel.hidden = total === 0;
+    count.textContent = `${total} / 2`;
+    open.disabled = total !== 2;
+    hint.textContent = total === 2 ? "2枚を比較できます。" : "画像を2枚追加すると比較できます。";
+  }
+
+  function toggleComparison(image) {
+    if (!image?.id) return;
+    if (state.comparison.has(image.id)) {
+      state.comparison.delete(image.id);
+      render();
+      const dialog = $("#comparison-dialog");
+      if (dialog?.open) {
+        if (state.comparison.size === 2) renderComparisonView();
+        else dialog.close();
+      }
+      setMessage(`「${image.filename}」を比較対象から外しました。`);
+      return;
+    }
+    if (state.comparison.size >= 2) {
+      setMessage("比較対象は2枚までです。先に比較を解除してください。", true);
+      return;
+    }
+    state.comparison.set(image.id, image);
+    render();
+    setMessage(`「${image.filename}」を比較対象に追加しました。`);
+  }
+
+  async function fetchComparisonSettings(imageId) {
+    const response = await fetch(`/api/images/${encodeURIComponent(imageId)}/generation-settings`, { cache: "no-store" });
+    const data = await response.json();
+    if (!response.ok || data.ok === false) throw new Error(data.error || "生成設定を読み込めません。");
+    return data.available === true && data.settings && typeof data.settings === "object" ? data.settings : null;
+  }
+
+  function comparisonLoras(settings) {
+    if (!Array.isArray(settings?.loras) || !settings.loras.length) return "なし";
+    return settings.loras.map((item) => {
+      const key = item?.key || item?.name || "";
+      const strength = item?.strength == null ? "" : ` / ${item.strength}`;
+      return `${key}${strength}`;
+    }).filter(Boolean).join(", ") || "なし";
+  }
+
+  function comparisonCharacter(settings, image) {
+    const values = [settings?.character_preset, settings?.freeform_character].filter(Boolean);
+    return values.join(" / ") || image.character_name || image.dataset_name || "-";
+  }
+
+  function comparisonRows(image, settings) {
+    const reference = settings?.reference && typeof settings.reference === "object" ? settings.reference : {};
+    const mode = reference.mode && reference.mode !== "none" ? reference.mode : "none";
+    const rows = [
+      ["ファイル", image.filename],
+      ["生成日時", image.generated_at || image.modified_at || "-"],
+      ["Character", comparisonCharacter(settings, image)],
+    ];
+    if (!settings) return rows;
+    rows.push(
+      ["Request", settings.request_text || "-"],
+      ["Appearance", settings.appearance_text || "-"],
+      ["Model", settings.model_key || "-"],
+      ["Rating", settings.rating || "-"],
+      ["LoRA", comparisonLoras(settings)],
+      ["Reference", mode],
+      ["requested seed", settings.seed == null ? "-" : String(settings.seed)],
+      ["actual seed", settings.actual_seed == null ? "-" : String(settings.actual_seed)],
+      ["Count / Variation", `${settings.count || 1} / ${settings.variation || "off"}`],
+    );
+    return rows;
+  }
+
+  function comparisonActionButton(label, handler, options = {}) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "button secondary";
+    button.textContent = label;
+    if (options.disabled) button.disabled = true;
+    button.addEventListener("click", handler);
+    return button;
+  }
+
+  function renderComparisonItem(image, settings, error = "") {
+    const article = document.createElement("article");
+    article.className = "comparison-item";
+    const imageWrap = document.createElement("div");
+    imageWrap.className = "comparison-image-wrap";
+    const imageElement = document.createElement("img");
+    imageElement.src = image.url || image.thumbnail_url;
+    imageElement.alt = image.filename || "比較画像";
+    imageWrap.append(imageElement);
+    article.append(imageWrap);
+
+    const heading = document.createElement("h3");
+    heading.textContent = image.filename || "画像";
+    article.append(heading);
+    const metadata = document.createElement("dl");
+    metadata.className = "comparison-metadata";
+    for (const [label, value] of comparisonRows(image, settings)) {
+      const term = document.createElement("dt");
+      const description = document.createElement("dd");
+      term.textContent = label;
+      description.textContent = String(value);
+      metadata.append(term, description);
+    }
+    if (error) {
+      const warning = document.createElement("p");
+      warning.className = "comparison-warning";
+      warning.textContent = "生成設定は利用できません。画像情報だけ表示しています。";
+      metadata.append(warning);
+    }
+    article.append(metadata);
+
+    const actions = document.createElement("div");
+    actions.className = "comparison-item-actions";
+    if (settings) {
+      actions.append(comparisonActionButton("この設定を使う", async (event) => {
+        state.detailImageId = image.id;
+        await restoreDetailGenerationSettings(event.currentTarget, image.id);
+      }));
+      const actualSeed = Number(settings.actual_seed);
+      actions.append(comparisonActionButton("実seedを使用", () => {
+        if (Number.isInteger(actualSeed) && actualSeed >= 0) {
+          applyActualSeed(actualSeed);
+          $("#comparison-dialog")?.close();
+        }
+      }, { disabled: !Number.isInteger(actualSeed) || actualSeed < 0 }));
+    }
+    actions.append(
+      comparisonActionButton("Compositionに使う", async (event) => {
+        state.detailImageId = image.id;
+        await useDetailImageAsReference("composition", event.currentTarget, image.id, image);
+      }),
+      comparisonActionButton("Poseに使う", async (event) => {
+        state.detailImageId = image.id;
+        await useDetailImageAsReference("pose", event.currentTarget, image.id, image);
+      }),
+      comparisonActionButton("詳細を開く", () => {
+        $("#comparison-dialog")?.close();
+        openDetail(image);
+      }),
+      comparisonActionButton("比較から外す", () => toggleComparison(image)),
+    );
+    article.append(actions);
+    return article;
+  }
+
+  async function renderComparisonView() {
+    const grid = $("#comparison-grid");
+    if (!grid) return;
+    const token = ++state.comparisonRenderToken;
+    grid.replaceChildren();
+    for (const image of comparisonItems()) {
+      const loading = document.createElement("article");
+      loading.className = "comparison-item";
+      loading.textContent = "生成設定を読み込み中…";
+      grid.append(loading);
+      try {
+        const settings = await fetchComparisonSettings(image.id);
+        if (token !== state.comparisonRenderToken || !state.comparison.has(image.id)) return;
+        loading.replaceWith(renderComparisonItem(image, settings));
+      } catch (_error) {
+        if (token !== state.comparisonRenderToken || !state.comparison.has(image.id)) return;
+        loading.replaceWith(renderComparisonItem(image, null, "settings unavailable"));
+      }
+    }
+  }
+
+  function openComparison() {
+    if (state.comparison.size !== 2) {
+      setMessage("比較対象を2枚選択してください。", true);
+      return;
+    }
+    const dialog = $("#comparison-dialog");
+    if (typeof dialog.showModal === "function") dialog.showModal(); else dialog.setAttribute("open", "");
+    renderComparisonView();
+  }
+
+  function clearComparison() {
+    state.comparison.clear();
+    state.comparisonRenderToken += 1;
+    $("#comparison-dialog")?.close();
+    render();
+    setMessage("比較対象を解除しました。");
   }
 
   function renderGenerationRestoreStatus(warnings = []) {
@@ -562,9 +782,9 @@
     }
   }
 
-  async function restoreDetailGenerationSettings() {
-    const imageId = state.detailImageId;
-    const button = $("#detail-restore-generation-settings");
+  async function restoreDetailGenerationSettings(buttonOverride = null, imageIdOverride = "") {
+    const imageId = imageIdOverride || state.detailImageId;
+    const button = buttonOverride || $("#detail-restore-generation-settings");
     if (!imageId || !button) return;
     button.disabled = true;
     try {
@@ -616,6 +836,7 @@
       renderGenerationRestoreStatus(warnings);
       renderGenerationRequestSummary();
       $("#detail-dialog")?.close();
+      $("#comparison-dialog")?.close();
       $("#generation-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
       setMessage(warnings.length ? "設定を読み込みました。一部に確認が必要です。" : "設定を読み込みました。生成前に内容を確認してください。");
     } catch (error) {
@@ -625,10 +846,10 @@
     }
   }
 
-  async function useDetailImageAsReference(mode) {
-    const imageId = state.detailImageId;
+  async function useDetailImageAsReference(mode, buttonOverride = null, imageIdOverride = "", imageOverride = null) {
+    const imageId = imageIdOverride || state.detailImageId;
     if (!imageId || !["composition", "pose"].includes(mode)) return;
-    const button = $(`#detail-use-${mode}-reference`);
+    const button = buttonOverride || $(`#detail-use-${mode}-reference`);
     if (button) button.disabled = true;
     try {
       const response = await fetch("/api/generation/references/from-gallery", {
@@ -640,7 +861,7 @@
       if (!response.ok || data.ok === false || !data.reference_image_id) {
         throw new Error(data.error || "Gallery画像をReferenceに登録できません。");
       }
-      const image = state.images.find((item) => item.id === imageId);
+      const image = imageOverride || state.images.find((item) => item.id === imageId);
       $("#generation-reference-mode").value = mode;
       state.generation.reference = {
         imageId: data.reference_image_id,
@@ -651,6 +872,7 @@
       updateGenerationReferenceState();
       $("#generation-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
       $("#detail-dialog")?.close();
+      $("#comparison-dialog")?.close();
       setMessage(`${mode === "pose" ? "Pose" : "Composition"} Referenceに設定しました。`);
     } catch (error) {
       setMessage(error.message || String(error), true);
@@ -1205,10 +1427,20 @@
       aiScore.className = "ai-score";
       aiScore.textContent = image.ai?.final_score == null ? "AI -" : `AI ${(Number(image.ai.final_score) * 100).toFixed(0)}`;
       meta.append(character, date, aiScore);
-      info.append(name, meta);
+      const comparisonButton = document.createElement("button");
+      comparisonButton.type = "button";
+      comparisonButton.className = "button secondary card-compare-button";
+      comparisonButton.textContent = state.comparison.has(image.id) ? "比較から外す" : "比較に追加";
+      comparisonButton.setAttribute("aria-label", `${image.filename}を${state.comparison.has(image.id) ? "比較から外す" : "比較に追加"}`);
+      comparisonButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        toggleComparison(image);
+      });
+      info.append(name, meta, comparisonButton);
       card.append(info);
       gallery.append(card);
     }
+    renderComparisonPanel();
     updateCounters();
   }
 
@@ -1448,6 +1680,7 @@
 
   function openDetail(image) {
     state.detailImageId = image.id;
+    state.detailImage = image;
     const metadata = image.metadata || {};
     $("#detail-title").textContent = image.filename;
     $("#detail-image").src = image.url;
@@ -1469,6 +1702,7 @@
     setDetail("#detail-negative", metadata.negative_prompt);
     setDetail("#detail-caption", metadata.caption);
     clearDetailActualSeed();
+    updateDetailComparisonUi();
     const dialog = $("#detail-dialog");
     if (typeof dialog.showModal === "function") dialog.showModal(); else dialog.setAttribute("open", "");
     loadDetailMatchInfo(image);
@@ -1533,6 +1767,9 @@
     $("#generation-reference-file").addEventListener("change", handleGenerationReferenceFileChange);
     $("#generation-reference-clear").addEventListener("click", clearGenerationReferenceSelection);
     $("#generation-copy-job-id").addEventListener("click", copyGenerationJobId);
+    $("#comparison-open").addEventListener("click", openComparison);
+    $("#comparison-clear").addEventListener("click", clearComparison);
+    $("#close-comparison").addEventListener("click", () => $("#comparison-dialog").close());
     for (const input of document.querySelectorAll("#generation-panel input:not([type='file']), #generation-panel select, #generation-panel textarea")) {
       input.addEventListener("input", renderGenerationRequestSummary);
       input.addEventListener("change", renderGenerationRequestSummary);
@@ -1630,6 +1867,7 @@
     $("#detail-use-pose-reference").addEventListener("click", () => useDetailImageAsReference("pose"));
     $("#detail-restore-generation-settings").addEventListener("click", restoreDetailGenerationSettings);
     $("#detail-use-actual-seed").addEventListener("click", useDetailActualSeed);
+    $("#detail-toggle-comparison").addEventListener("click", toggleDetailComparison);
     $("#detail-dialog").addEventListener("click", (event) => {
       if (event.target === $("#detail-dialog")) $("#detail-dialog").close();
     });
