@@ -368,7 +368,14 @@
       <button id="close-detail" class="close-button" type="button" aria-label="閉じる">×</button>
     </div>
     <div class="detail-body">
-      <div class="detail-image-wrap"><img id="detail-image" alt=""></div>
+      <div class="detail-viewer">
+        <div class="detail-image-wrap"><img id="detail-image" alt=""></div>
+        <div class="detail-navigation" aria-label="画像移動">
+          <button id="detail-previous" class="button secondary" type="button">← 前へ</button>
+          <span id="detail-position" class="detail-position" aria-live="polite"></span>
+          <button id="detail-next" class="button secondary" type="button">次へ →</button>
+        </div>
+      </div>
       <dl class="metadata-list">
         <div><dt>状態</dt><dd id="detail-status"></dd></div>
         <div><dt>LoRA候補</dt><dd id="detail-lora-candidate"></dd></div>
@@ -442,6 +449,7 @@
   </dialog>
 
   <script src="/static/generation_poll_guard.js" defer></script>
+  <script src="/static/detail_viewer.js" defer></script>
   <script src="/static/app.js" defer></script>
 </body>
 </html>

@@ -286,8 +286,13 @@ input:focus, select:focus { border-color: var(--accent); }
 .detail-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 17px; border-bottom: 1px solid var(--line); }
 .close-button { border: 0; background: transparent; color: var(--muted); font-size: 28px; line-height: 1; }
 .detail-body { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(280px, 1fr); gap: 18px; padding: 17px; overflow: auto; }
-.detail-image-wrap { display: grid; place-items: center; min-height: 260px; border-radius: 8px; background: #0d0e12; }
-.detail-image-wrap img { display: block; max-width: 100%; max-height: 68vh; object-fit: contain; }
+.detail-viewer { display: grid; min-width: 0; align-content: start; gap: 10px; }
+.detail-image-wrap { display: grid; place-items: center; min-height: 0; max-height: min(70vh, 760px); overflow: hidden; border-radius: 8px; background: #0d0e12; }
+.detail-image-wrap img { display: block; width: auto; height: auto; max-width: 100%; max-height: min(70vh, 760px); object-fit: contain; }
+.detail-navigation { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 8px; }
+.detail-navigation .button { min-height: 42px; }
+.detail-navigation .button:last-child { text-align: right; }
+.detail-position { min-width: 4.5rem; color: var(--muted); font-size: 13px; text-align: center; }
 .metadata-list { display: grid; grid-template-columns: 1fr 1fr; align-content: start; gap: 10px 14px; margin: 0; }
 .metadata-list > div { min-width: 0; }
 .metadata-list .wide { grid-column: 1 / -1; }
@@ -396,7 +401,9 @@ dd { margin: 2px 0 0; overflow-wrap: anywhere; }
   .recent-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .card-info { padding: 7px; }
   .detail-body { grid-template-columns: 1fr; padding: 12px; }
-  .detail-image-wrap img { max-height: 48vh; }
+  .detail-image-wrap { max-height: min(56vh, 560px); }
+  .detail-image-wrap img { max-height: min(56vh, 560px); }
+  .detail-navigation .button { min-height: 44px; }
   .card-detail-button { min-height: 42px; }
   .detail-secondary-tools > summary { padding: 12px 0; }
   .detail-reference-buttons, .detail-selection-buttons { flex-direction: column; }

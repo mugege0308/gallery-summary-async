@@ -22,6 +22,7 @@
     rangeAnchorId: null,
     detailImageId: null,
     detailImage: null,
+    detailSequence: [],
     detailActualSeed: null,
     comparison: new Map(),
     comparisonRenderToken: 0,
@@ -1708,7 +1709,7 @@
       detail.textContent = "詳細";
       detail.title = "詳細を開く";
       detail.setAttribute("aria-label", `${image.filename}の詳細を開く`);
-      detail.addEventListener("click", (event) => { event.stopPropagation(); openDetail(image); });
+      detail.addEventListener("click", (event) => { event.stopPropagation(); openDetail(image, state.recentImages); });
       overlay.append(detail);
       card.append(overlay);
 
@@ -1772,7 +1773,7 @@
       card.addEventListener("dblclick", (event) => {
         if (event.target.closest("button")) return;
         if (clickTimer) clearTimeout(clickTimer);
-        openDetail(image);
+        openDetail(image, state.images);
       });
       card.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") {
@@ -1825,7 +1826,7 @@
       detail.textContent = "詳細";
       detail.title = "詳細を開く";
       detail.setAttribute("aria-label", `${image.filename}の詳細を開く`);
-      detail.addEventListener("click", (event) => { event.stopPropagation(); openDetail(image); });
+      detail.addEventListener("click", (event) => { event.stopPropagation(); openDetail(image, state.images); });
       overlay.append(overlayLeft, detail);
       card.append(overlay);
 
@@ -2133,7 +2134,49 @@
 
   function setDetail(id, value) { $(id).textContent = escapeText(value); }
 
-  function openDetail(image) {
+  function detailSequenceFor(image, preferredSequence = null) {
+    const preferred = Array.isArray(preferredSequence) ? preferredSequence : [];
+    if (preferred.some((item) => item && String(item.id) === String(image.id))) return preferred.slice();
+    if (state.images.some((item) => String(item.id) === String(image.id))) return state.images.slice();
+    if (state.recentImages.some((item) => String(item.id) === String(image.id))) return state.recentImages.slice();
+    return [image];
+  }
+
+  function detailNavigation(sequence, imageId) {
+    if (typeof DetailViewer !== "undefined" && DetailViewer.navigation) {
+      return DetailViewer.navigation(sequence, imageId);
+    }
+    const items = Array.isArray(sequence) ? sequence : [];
+    const index = items.findIndex((item) => item && String(item.id) === String(imageId));
+    return {
+      index,
+      total: items.length,
+      previous: index > 0 ? items[index - 1] : null,
+      next: index >= 0 && index < items.length - 1 ? items[index + 1] : null,
+    };
+  }
+
+  function updateDetailNavigation() {
+    const navigation = detailNavigation(state.detailSequence, state.detailImageId);
+    const previous = $("#detail-previous");
+    const next = $("#detail-next");
+    const position = $("#detail-position");
+    if (!previous || !next || !position) return;
+    previous.disabled = !navigation.previous;
+    next.disabled = !navigation.next;
+    position.textContent = navigation.index >= 0
+      ? `${navigation.index + 1} / ${navigation.total}`
+      : "";
+  }
+
+  function navigateDetail(direction) {
+    const navigation = detailNavigation(state.detailSequence, state.detailImageId);
+    const target = direction < 0 ? navigation.previous : navigation.next;
+    if (target) openDetail(target, state.detailSequence);
+  }
+
+  function openDetail(image, preferredSequence = null) {
+    state.detailSequence = detailSequenceFor(image, preferredSequence);
     state.detailImageId = image.id;
     state.detailImage = image;
     const metadata = image.metadata || {};
@@ -2157,6 +2200,7 @@
     setDetail("#detail-negative", metadata.negative_prompt);
     setDetail("#detail-caption", metadata.caption);
     clearDetailActualSeed();
+    updateDetailNavigation();
     updateDetailComparisonUi();
     const dialog = $("#detail-dialog");
     if (typeof dialog.showModal === "function") dialog.showModal(); else dialog.setAttribute("open", "");
@@ -2333,6 +2377,8 @@
       }
     });
     $("#close-detail").addEventListener("click", () => $("#detail-dialog").close());
+    $("#detail-previous").addEventListener("click", () => navigateDetail(-1));
+    $("#detail-next").addEventListener("click", () => navigateDetail(1));
     $("#detail-set-anchor").addEventListener("click", () => {
       const image = state.detailImage || state.images.find((item) => item.id === state.detailImageId);
       if (image) setRangeAnchor(image);
