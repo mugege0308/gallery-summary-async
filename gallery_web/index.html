@@ -235,6 +235,7 @@
             <option value="2">2</option>
             <option value="3">3</option>
             <option value="4">4</option>
+            <option value="8">8</option>
           </select>
         </label>
         <label>Variation
@@ -261,6 +262,7 @@
           <code id="generation-result-job-id" class="generation-job-id"></code>
           <button id="generation-copy-job-id" class="button secondary" type="button">job_idをコピー</button>
           <a id="generation-result-link" class="button secondary" href="#" hidden>Galleryで結果を見る</a>
+          <button id="generation-more-four" class="button secondary" type="button" hidden>同じ設定でもう4枚（新しいseed）</button>
           <span id="generation-copy-status" class="generation-copy-status" role="status"></span>
         </div>
         <dl id="generation-result-details" class="generation-summary-list"></dl>
@@ -452,6 +454,7 @@
 
   <script src="/static/generation_poll_guard.js" defer></script>
   <script src="/static/generation_settings.js" defer></script>
+  <script src="/static/generation_continuation.js" defer></script>
   <script src="/static/detail_viewer.js" defer></script>
   <script src="/static/app.js" defer></script>
 </body>

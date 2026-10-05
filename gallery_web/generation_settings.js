@@ -61,7 +61,7 @@
     }
     if (!["off", "auto"].includes(result.variation)) result.variation = "off";
     const count = Number(result.count);
-    result.count = [1, 2, 3, 4].includes(count) ? String(count) : "1";
+    result.count = [1, 2, 3, 4, 8].includes(count) ? String(count) : "1";
     if (result.count === "1") result.variation = "off";
     const seed = Number(result.seed);
     result.seed = Number.isInteger(seed) && seed >= -1 ? String(seed) : "-1";

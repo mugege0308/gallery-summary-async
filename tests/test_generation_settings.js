@@ -48,10 +48,14 @@ function testNormalizationAndSeedPreservation() {
   assert.strictEqual(fixed.count, "4");
   assert.strictEqual(fixed.variation, "auto");
   assert.strictEqual(fixed.seed, "123456");
+
+  const eight = settings.normalize({ count: "8", variation: "auto", seed: "-1" });
+  assert.strictEqual(eight.count, "8");
+  assert.strictEqual(eight.variation, "auto");
 }
 
 function testInvalidSavedValuesFallBackSafely() {
-  const normalized = settings.normalize({ count: "8", variation: "invalid", seed: "not-a-seed" });
+  const normalized = settings.normalize({ count: "6", variation: "invalid", seed: "not-a-seed" });
   assert.strictEqual(normalized.count, "1");
   assert.strictEqual(normalized.variation, "off");
   assert.strictEqual(normalized.seed, "-1");

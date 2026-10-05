@@ -34,6 +34,7 @@
       pollTimer: null,
       submitting: false,
       lastRequest: null,
+      lastCompletedRequest: null,
       lastOutput: null,
       reference: { imageId: "", fileName: "", previewUrl: "", source: "" },
       tagSearch: { selected: [], results: [], query: "", category: "all", warning: "" },
@@ -254,6 +255,12 @@
     $("#generation-result-job-id").textContent = jobId;
     $("#generation-result-link").href = generationResultUrl(jobId);
     $("#generation-result-link").hidden = false;
+    const moreButton = $("#generation-more-four");
+    if (moreButton) {
+      const canContinue = data?.state === "completed" && total === 4 && completed === 4 && failed === 0;
+      moreButton.hidden = !canContinue;
+      moreButton.disabled = Boolean(state.generation.submitting);
+    }
     renderGenerationSummaryRows("#generation-result-details", [
       ["枚数", `${completed} / ${total}`],
       ["actual seed", seeds.join(", ")],
@@ -272,6 +279,11 @@
     if (container) container.hidden = true;
     const status = $("#generation-copy-status");
     if (status) status.textContent = "";
+    const moreButton = $("#generation-more-four");
+    if (moreButton) {
+      moreButton.hidden = true;
+      moreButton.disabled = false;
+    }
   }
 
   async function copyTextWithFallback(value) {
@@ -1187,7 +1199,13 @@
       if (select) select.value = "";
       updateGenerationLoraDefault(type);
     }
-    for (const item of Array.isArray(loras) ? loras : []) {
+    const items = Array.isArray(loras)
+      ? loras
+      : Object.entries(loras && typeof loras === "object" ? loras : {}).map(([lora_type, item]) => ({
+        ...(item && typeof item === "object" ? item : {}),
+        lora_type,
+      }));
+    for (const item of items) {
       const type = item?.lora_type;
       const key = item?.key;
       const select = $(`#generation-${type}-lora`);
@@ -1265,6 +1283,7 @@
     state.generation.restoreWarnings = [];
     state.generation.tagSearch = { selected: [], results: [], query: "", category: "all", warning: "" };
     state.generation.lastRequest = null;
+    state.generation.lastCompletedRequest = null;
     state.generation.lastOutput = null;
     hideGenerationResultSummary();
     setGenerationStatus("未実行");
@@ -1303,7 +1322,7 @@
       restoreGenerationLoras(settings.loras, warnings);
 
       const count = Number(settings.count);
-      $("#generation-count").value = [1, 2, 3, 4].includes(count) ? String(count) : "1";
+      $("#generation-count").value = [1, 2, 3, 4, 8].includes(count) ? String(count) : "1";
       updateGenerationVariationState();
       $("#generation-variation").value = $("#generation-count").value === "1" ? "off" : (settings.variation === "auto" ? "auto" : "off");
       const seed = Number(settings.seed);
@@ -1449,6 +1468,7 @@
       size: $("#generation-size").value,
       count: Number($("#generation-count").value || 1),
       variation: $("#generation-variation").value || "off",
+      variation_offset: 0,
       seed,
       reference_mode: generationReferenceMode(),
       reference_image_id: referenceImageId,
@@ -1508,6 +1528,9 @@
         stopGenerationPolling();
         state.generation.submitting = false;
         $("#generation-submit").disabled = false;
+        state.generation.lastCompletedRequest = state.generation.lastRequest
+          ? JSON.parse(JSON.stringify(state.generation.lastRequest))
+          : null;
         $("#job-filter").value = jobId;
         renderGenerationResultSummary(data, jobId);
         setMessage("生成が完了しました。Galleryを同期しています。");
@@ -1535,7 +1558,7 @@
     }
   }
 
-  async function submitGeneration() {
+  async function submitGeneration(requestOverride = null) {
     if (state.generation.submitting) return;
     if (state.generation.auth.required && !state.generation.auth.authenticated) {
       setGenerationStatus("リモート生成キーで認証してください。", true);
@@ -1545,14 +1568,23 @@
     hideGenerationResultSummary();
     state.generation.submitting = true;
     $("#generation-submit").disabled = true;
+    $("#generation-more-four").disabled = true;
     renderGenerationRequestSummary();
-    saveGenerationSettings();
+    if (!requestOverride) saveGenerationSettings();
     setGenerationStatus("送信中…");
     try {
-      const referenceMode = generationReferenceMode();
-      if (referenceMode !== "none") setGenerationStatus("参考画像を登録中…");
-      const referenceImageId = await uploadGenerationReference();
-      const payload = generationPayload(referenceImageId);
+      let payload;
+      if (requestOverride && typeof requestOverride === "object") {
+        payload = JSON.parse(JSON.stringify(requestOverride));
+        if (payload.reference_mode !== "none" && !payload.reference_image_id) {
+          throw new Error("直前のReference画像が利用できないため、追加生成できません。Referenceを再指定してください。");
+        }
+      } else {
+        const referenceMode = generationReferenceMode();
+        if (referenceMode !== "none") setGenerationStatus("参考画像を登録中…");
+        const referenceImageId = await uploadGenerationReference();
+        payload = generationPayload(referenceImageId);
+      }
       state.generation.lastRequest = payload;
       const response = await fetch("/api/generation/jobs", {
         method: "POST",
@@ -1571,6 +1603,17 @@
       $("#generation-submit").disabled = false;
       setGenerationStatus(error.message || String(error), true);
     }
+  }
+
+  function submitSameSettingsFourMore() {
+    if (state.generation.submitting || !state.generation.lastCompletedRequest) return;
+    if (typeof GenerationContinuation === "undefined") return;
+    const request = GenerationContinuation.buildAdditionalGenerationRequest(
+      state.generation.lastCompletedRequest,
+    );
+    if (!request) return;
+    setMessage("直前の設定で追加4枚を送信します。seedだけ新しくします。");
+    submitGeneration(request);
   }
 
   function filters() {
@@ -2405,7 +2448,7 @@
       button.addEventListener("click", () => setView(button.dataset.viewTarget, { focus: button.dataset.viewTarget === "generate" }));
     }
     $("#refresh").addEventListener("click", () => load({ page: state.page }));
-    $("#generation-submit").addEventListener("click", submitGeneration);
+    $("#generation-submit").addEventListener("click", () => submitGeneration());
     $("#generation-auth-submit").addEventListener("click", unlockGeneration);
     $("#generation-auth-logout").addEventListener("click", logoutGeneration);
     $("#generation-count").addEventListener("change", updateGenerationVariationState);
@@ -2413,6 +2456,7 @@
     $("#generation-reference-file").addEventListener("change", handleGenerationReferenceFileChange);
     $("#generation-reference-clear").addEventListener("click", clearGenerationReferenceSelection);
     $("#generation-copy-job-id").addEventListener("click", copyGenerationJobId);
+    $("#generation-more-four").addEventListener("click", submitSameSettingsFourMore);
     $("#generation-tag-search-toggle").addEventListener("click", toggleGenerationTagSearch);
     $("#generation-tag-search-submit").addEventListener("click", searchGenerationTags);
     $("#generation-tag-search-category").addEventListener("change", () => {

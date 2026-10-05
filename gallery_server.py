@@ -181,7 +181,7 @@ def _safe_generation_settings(image: dict[str, Any], *, count_fallback: int = 1)
         count = int(count)
     except (TypeError, ValueError):
         count = 1
-    if count not in {1, 2, 3, 4}:
+    if count < 1 or count > 8:
         warnings.append("元の枚数は復元できないため、1枚に戻します。")
         count = 1
     variation = value("variation", fallback="off")
