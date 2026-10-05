@@ -297,6 +297,16 @@ class GalleryGenerationProxyTests(unittest.TestCase):
                                 "reference_image_id": "opaque-reference-123",
                                 "reference_strength": 0.5,
                                 "reference_fit": "contain",
+                                "tag_provenance": [
+                                    {"tag": "portrait", "source": "user_explicit", "category": "framing"},
+                                    {"tag": "masterpiece", "source": "quality_default", "category": ""},
+                                ],
+                                "suppressed_tags": [
+                                    {"tag": "solo", "source": "prompt_designer", "reason": "multi-person constraint", "category": "people_count"},
+                                ],
+                                "prompt_conflicts": [
+                                    {"category": "expression", "tags": ["smile", "serious"], "sources": ["user_explicit"], "reason": "explicit conflict"},
+                                ],
                                 "positive": "must not become a form field",
                                 "negative_prompt": "must not become a form field",
                             }
@@ -316,6 +326,9 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertEqual("auto", settings["variation"])
         self.assertEqual("opaque-reference-123", settings["reference"]["image_id"])
         self.assertEqual([{"key": "komagome_style_v1", "lora_type": "style", "strength": 0.5}], settings["loras"])
+        self.assertEqual("portrait", settings["prompt_provenance"]["tag_provenance"][0]["tag"])
+        self.assertEqual("solo", settings["prompt_provenance"]["suppressed_tags"][0]["tag"])
+        self.assertEqual("expression", settings["prompt_provenance"]["prompt_conflicts"][0]["category"])
         self.assertNotIn("positive", json.dumps(value))
         self.assertNotIn("negative_prompt", json.dumps(value))
         self.assertNotIn("safetensors", json.dumps(value))
@@ -710,6 +723,7 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn('id="detail-actual-seed-tools"', html)
         self.assertIn('id="detail-actual-seed"', html)
         self.assertIn('id="detail-use-actual-seed"', html)
+        self.assertIn('id="detail-prompt-provenance"', html)
         self.assertIn('id="comparison-panel"', html)
         self.assertIn('id="comparison-open"', html)
         self.assertIn('id="comparison-dialog"', html)
@@ -755,6 +769,9 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn('/generation-settings', app)
         self.assertIn('restoreDetailGenerationSettings', app)
         self.assertIn('loadDetailActualSeed', app)
+        self.assertIn('loadDetailProvenance', app)
+        self.assertIn('自動補完の内訳', html)
+        self.assertIn('prompt_provenance', app)
         self.assertIn('useDetailActualSeed', app)
         self.assertIn('settings?.actual_seed', app)
         self.assertIn('data.available !== true', app)

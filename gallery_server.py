@@ -122,6 +122,66 @@ def _safe_generation_settings(image: dict[str, Any], *, count_fallback: int = 1)
         raw = value(*keys, fallback=fallback)
         return raw.strip() if isinstance(raw, str) else fallback
 
+    def safe_provenance(raw: Any, kind: str) -> list[dict[str, Any]]:
+        """Expose only bounded tag provenance, never the raw sidecar."""
+
+        if not isinstance(raw, list):
+            return []
+        result: list[dict[str, Any]] = []
+        for item in raw[:256]:
+            if not isinstance(item, dict):
+                continue
+            tag = item.get("tag")
+            source = item.get("source")
+            if not isinstance(tag, str) or not tag.strip() or not isinstance(source, str) or not source.strip():
+                continue
+            if kind == "provenance":
+                result.append(
+                    {
+                        "tag": tag.strip()[:160],
+                        "source": source.strip()[:80],
+                        "category": str(item.get("category") or "").strip()[:80],
+                    }
+                )
+            elif kind == "suppressed":
+                result.append(
+                    {
+                        "tag": tag.strip()[:160],
+                        "source": source.strip()[:80],
+                        "reason": str(item.get("reason") or "").strip()[:240],
+                        "category": str(item.get("category") or "").strip()[:80],
+                    }
+                )
+        return result
+
+    def safe_conflicts(raw: Any) -> list[dict[str, Any]]:
+        if not isinstance(raw, list):
+            return []
+        result: list[dict[str, Any]] = []
+        for item in raw[:64]:
+            if not isinstance(item, dict):
+                continue
+            category = item.get("category")
+            tags = item.get("tags")
+            sources = item.get("sources")
+            if not isinstance(category, str) or not category.strip() or not isinstance(tags, list):
+                continue
+            result.append(
+                {
+                    "category": category.strip()[:80],
+                    "tags": [str(tag).strip()[:160] for tag in tags[:16] if str(tag).strip()],
+                    "sources": [str(source).strip()[:80] for source in (sources if isinstance(sources, list) else [])[:8] if str(source).strip()],
+                    "reason": str(item.get("reason") or "explicit conflict").strip()[:240],
+                }
+            )
+        return result
+
+    prompt_provenance = {
+        "tag_provenance": safe_provenance(value("tag_provenance", fallback=[]), "provenance"),
+        "suppressed_tags": safe_provenance(value("suppressed_tags", fallback=[]), "suppressed"),
+        "prompt_conflicts": safe_conflicts(value("prompt_conflicts", fallback=[])),
+    }
+
     explicit_tags = value("explicit_tags", fallback=[])
     if not isinstance(explicit_tags, list):
         explicit_tags = []
@@ -242,6 +302,7 @@ def _safe_generation_settings(image: dict[str, Any], *, count_fallback: int = 1)
             "seed": requested_seed,
             "actual_seed": actual_seed,
             "reference": reference,
+            "prompt_provenance": prompt_provenance,
         },
     }
 

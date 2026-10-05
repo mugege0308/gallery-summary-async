@@ -24,6 +24,7 @@
     detailImage: null,
     detailSequence: [],
     detailActualSeed: null,
+    detailProvenanceToken: 0,
     comparison: new Map(),
     comparisonRenderToken: 0,
     comparisonDiffOnly: false,
@@ -2321,6 +2322,81 @@
 
   function setDetail(id, value) { $(id).textContent = escapeText(value); }
 
+  const provenanceSourceLabels = {
+    user_explicit: "明示指定",
+    user_request: "明示リクエスト",
+    character_preset: "キャラクター設定",
+    character_confirmed: "キャラクター確認済み",
+    appearance_resolver: "見た目の解決",
+    reference_lock: "Reference固定",
+    variation_auto: "Variation Auto",
+    prompt_designer: "Prompt Designer",
+    request_resolver: "Prompt Designer",
+    inference: "推測",
+    system: "既定値",
+    finalizer_default: "既定値",
+    quality_default: "品質補完",
+    lora_trigger: "LoRA trigger",
+  };
+
+  function provenanceSourceLabel(source) {
+    return provenanceSourceLabels[String(source || "").trim()] || String(source || "自動処理");
+  }
+
+  function renderProvenanceGroup(container, title, entries, formatter) {
+    if (!Array.isArray(entries) || !entries.length) return;
+    const heading = document.createElement("strong");
+    heading.textContent = title;
+    container.appendChild(heading);
+    const list = document.createElement("ul");
+    list.className = "detail-provenance-list";
+    for (const entry of entries.slice(0, 64)) {
+      const item = document.createElement("li");
+      item.textContent = formatter(entry);
+      list.appendChild(item);
+    }
+    container.appendChild(list);
+  }
+
+  function renderDetailProvenance(provenance) {
+    const panel = $("#detail-prompt-provenance");
+    const body = $("#detail-prompt-provenance-body");
+    if (!panel || !body) return;
+    body.replaceChildren();
+    const data = provenance && typeof provenance === "object" ? provenance : {};
+    const finalTags = Array.isArray(data.tag_provenance) ? data.tag_provenance : [];
+    const suppressed = Array.isArray(data.suppressed_tags) ? data.suppressed_tags : [];
+    const conflicts = Array.isArray(data.prompt_conflicts) ? data.prompt_conflicts : [];
+    const explicit = finalTags.filter((entry) => ["user_explicit", "user_request"].includes(entry?.source));
+    const automatic = finalTags.filter((entry) => !["user_explicit", "user_request"].includes(entry?.source));
+    renderProvenanceGroup(body, "明示指定", explicit, (entry) => `${entry.tag} — ${provenanceSourceLabel(entry.source)}`);
+    renderProvenanceGroup(body, "自動補完", automatic, (entry) => `${entry.tag} — ${provenanceSourceLabel(entry.source)}`);
+    renderProvenanceGroup(body, "抑制されたタグ", suppressed, (entry) => {
+      const reason = entry.reason ? ` → ${entry.reason}` : "";
+      return `${entry.tag} — ${provenanceSourceLabel(entry.source)}${reason}`;
+    });
+    renderProvenanceGroup(body, "明示指定同士の警告", conflicts, (entry) => {
+      const tags = Array.isArray(entry.tags) ? entry.tags.join(" / ") : "";
+      return `${entry.category || "制約"}: ${tags}`;
+    });
+    panel.hidden = !body.childElementCount;
+  }
+
+  async function loadDetailProvenance(imageId) {
+    const panel = $("#detail-prompt-provenance");
+    if (!panel || !imageId) return;
+    const token = ++state.detailProvenanceToken;
+    panel.hidden = true;
+    try {
+      const response = await fetch(`/api/images/${encodeURIComponent(imageId)}/generation-settings`, { cache: "no-store" });
+      const data = await response.json();
+      if (token !== state.detailProvenanceToken || String(state.detailImageId) !== String(imageId)) return;
+      renderDetailProvenance(data.settings?.prompt_provenance || null);
+    } catch (_error) {
+      if (token === state.detailProvenanceToken) renderDetailProvenance(null);
+    }
+  }
+
   function detailSequenceFor(image, preferredSequence = null) {
     const preferred = Array.isArray(preferredSequence) ? preferredSequence : [];
     if (preferred.some((item) => item && String(item.id) === String(image.id))) return preferred.slice();
@@ -2393,6 +2469,7 @@
     if (typeof dialog.showModal === "function") dialog.showModal(); else dialog.setAttribute("open", "");
     loadDetailMatchInfo(image);
     loadDetailActualSeed(image.id);
+    loadDetailProvenance(image.id);
   }
 
   async function commit() {
