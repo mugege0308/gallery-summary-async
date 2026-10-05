@@ -16,6 +16,9 @@ from urllib.request import Request, build_opener, urlopen
 import gallery_server
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 class FakeGenerationBackendHandler(BaseHTTPRequestHandler):
     last_payload: dict[str, object] | None = None
     last_tag_search_query: dict[str, list[str]] | None = None
@@ -760,7 +763,10 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn('/api/generation/auth/status', app)
         self.assertIn('id="generation-auth-remember"', html)
         self.assertIn('id="generation-auth-logout"', html)
-        self.assertNotIn("localStorage", app)
+        self.assertIn("localStorage", app)
+        settings_helper = (ROOT / "gallery_web" / "generation_settings.js").read_text(encoding="utf-8")
+        self.assertNotIn("generation-auth-token", settings_helper)
+        self.assertNotIn("reference_image_id", settings_helper)
         self.assertIn('X-Gallery-Generation-CSRF', app)
         self.assertIn('reference_mode: generationReferenceMode()', app)
         self.assertIn('freeform_character: $("#generation-freeform-character").value.trim() || null', app)

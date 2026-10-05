@@ -38,6 +38,7 @@
       reference: { imageId: "", fileName: "", previewUrl: "", source: "" },
       tagSearch: { selected: [], results: [], query: "", category: "all", warning: "" },
       restoreWarnings: [],
+      settingsRestored: false,
       tracking: GenerationPollGuard.create(),
       auth: {
         required: false,
@@ -54,7 +55,73 @@
   let loadToken = 0;
   let recentLoadToken = 0;
   let aiPollTimer = null;
+  let generationSettingsSaveTimer = null;
   const $ = (selector) => document.querySelector(selector);
+
+  const generationSettingSelectors = [
+    "#generation-character-preset",
+    "#generation-freeform-character",
+    "#generation-explicit-tags",
+    "#generation-appearance",
+    "#generation-request",
+    "#generation-model",
+    "#generation-rating",
+    "#generation-size",
+    "#generation-seed",
+    "#generation-character-lora",
+    "#generation-character-strength",
+    "#generation-style-lora",
+    "#generation-style-strength",
+    "#generation-additional-lora",
+    "#generation-additional-strength",
+    "#generation-count",
+    "#generation-variation",
+  ];
+
+  function generationSettingsStorage() {
+    try {
+      return window.localStorage;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function generationFormSettings() {
+    const loras = {};
+    for (const type of ["character", "style", "additional"]) {
+      loras[type] = {
+        key: $(`#generation-${type}-lora`)?.value || "",
+        strength: $(`#generation-${type}-strength`)?.value || "0.5",
+      };
+    }
+    return {
+      character_preset: $("#generation-character-preset")?.value || "",
+      freeform_character: $("#generation-freeform-character")?.value || "",
+      explicit_tags: $("#generation-explicit-tags")?.value || "",
+      appearance_text: $("#generation-appearance")?.value || "",
+      request_text: $("#generation-request")?.value || "",
+      model_key: $("#generation-model")?.value || "",
+      rating: $("#generation-rating")?.value || "",
+      size: $("#generation-size")?.value || "",
+      loras,
+      count: $("#generation-count")?.value || "1",
+      variation: $("#generation-variation")?.value || "off",
+      seed: $("#generation-seed")?.value || "-1",
+    };
+  }
+
+  function saveGenerationSettings() {
+    if (typeof GenerationSettings === "undefined") return false;
+    return GenerationSettings.write(generationSettingsStorage(), generationFormSettings());
+  }
+
+  function scheduleGenerationSettingsSave() {
+    if (generationSettingsSaveTimer) window.clearTimeout(generationSettingsSaveTimer);
+    generationSettingsSaveTimer = window.setTimeout(() => {
+      generationSettingsSaveTimer = null;
+      saveGenerationSettings();
+    }, 180);
+  }
 
   function setView(view, { focus = false } = {}) {
     for (const section of document.querySelectorAll("[data-view-section]")) {
@@ -314,6 +381,7 @@
     seedInput.dispatchEvent(new Event("input", { bubbles: true }));
     seedInput.dispatchEvent(new Event("change", { bubbles: true }));
     renderGenerationRequestSummary();
+    saveGenerationSettings();
     $("#detail-dialog")?.close();
     setView("generate", { focus: true });
     setMessage(`実seed ${actualSeed} を設定しました。生成前に内容を確認してください。`);
@@ -800,6 +868,7 @@
     capability.textContent = "生成可能（この端末）";
     capability.classList.add("ready");
     updateGenerationAuthUi();
+    restoreSavedGenerationSettings();
     renderGenerationRequestSummary();
   }
 
@@ -1135,6 +1204,78 @@
     }
   }
 
+  function restoreSavedGenerationSettings() {
+    if (state.generation.settingsRestored) return;
+    state.generation.settingsRestored = true;
+    if (typeof GenerationSettings === "undefined") return;
+    const saved = GenerationSettings.read(generationSettingsStorage());
+    if (!saved) return;
+
+    const warnings = [];
+    $("#generation-character-preset").value = "";
+    $("#generation-freeform-character").value = saved.freeform_character;
+    $("#generation-explicit-tags").value = saved.explicit_tags;
+    $("#generation-appearance").value = saved.appearance_text;
+    $("#generation-request").value = saved.request_text;
+    restoreGenerationSelect("#generation-character-preset", saved.character_preset, "Character preset", warnings);
+    if (saved.model_key) restoreGenerationSelect("#generation-model", saved.model_key, "Model", warnings);
+    if (saved.rating) restoreGenerationSelect("#generation-rating", saved.rating, "Rating", warnings);
+    if (saved.size) restoreGenerationSelect("#generation-size", saved.size, "Size", warnings);
+    restoreGenerationLoras(saved.loras, warnings);
+
+    $("#generation-count").value = saved.count;
+    updateGenerationVariationState();
+    $("#generation-variation").value = $("#generation-count").value === "1" ? "off" : saved.variation;
+    $("#generation-seed").value = saved.seed;
+
+    // References are intentionally session-only.  A normal Generate view
+    // always starts without a previous upload or Gallery-selected asset.
+    $("#generation-reference-mode").value = "none";
+    state.generation.reference = { imageId: "", fileName: "", previewUrl: "", source: "" };
+    const referenceFile = $("#generation-reference-file");
+    if (referenceFile) referenceFile.value = "";
+    state.generation.restoreWarnings = warnings;
+    updateGenerationReferenceState();
+    renderGenerationRestoreStatus(warnings);
+    renderGenerationRequestSummary();
+    // Persist normalized catalog-safe values so removed LoRAs/presets do not
+    // keep coming back on every page load.
+    saveGenerationSettings();
+  }
+
+  function resetGenerationForm() {
+    if (typeof GenerationSettings !== "undefined") GenerationSettings.clear(generationSettingsStorage());
+    if (state.generation.options) renderGenerationOptions(state.generation.options);
+    $("#generation-character-preset").value = "";
+    $("#generation-freeform-character").value = "";
+    $("#generation-explicit-tags").value = "";
+    $("#generation-appearance").value = "";
+    $("#generation-request").value = "";
+    $("#generation-seed").value = $("#generation-seed").defaultValue || "-1";
+    $("#generation-count").value = $("#generation-count").querySelector("option")?.value || "1";
+    $("#generation-variation").value = $("#generation-variation").defaultValue || "off";
+    $("#generation-reference-mode").value = "none";
+    $("#generation-reference-strength").value = $("#generation-reference-strength").defaultValue || "0.5";
+    $("#generation-reference-fit").value = $("#generation-reference-fit").defaultValue || "contain";
+    for (const type of ["character", "style", "additional"]) {
+      $(`#generation-${type}-lora`).value = "";
+      updateGenerationLoraDefault(type);
+    }
+    clearGenerationReferenceSelection();
+    state.generation.restoreWarnings = [];
+    state.generation.tagSearch = { selected: [], results: [], query: "", category: "all", warning: "" };
+    state.generation.lastRequest = null;
+    state.generation.lastOutput = null;
+    hideGenerationResultSummary();
+    setGenerationStatus("未実行");
+    updateGenerationVariationState();
+    updateGenerationReferenceState();
+    renderTagSearch();
+    renderGenerationRestoreStatus([]);
+    renderGenerationRequestSummary();
+    setMessage("入力をリセットしました。次回Generateでは既定値を使用します。");
+  }
+
   async function restoreDetailGenerationSettings(buttonOverride = null, imageIdOverride = "") {
     const imageId = imageIdOverride || state.detailImageId;
     const button = buttonOverride || $("#detail-restore-generation-settings");
@@ -1188,6 +1329,7 @@
       updateGenerationReferenceState();
       renderGenerationRestoreStatus(warnings);
       renderGenerationRequestSummary();
+      saveGenerationSettings();
       $("#detail-dialog")?.close();
       $("#comparison-dialog")?.close();
       setView("generate", { focus: true });
@@ -1222,6 +1364,7 @@
         previewUrl: image?.thumbnail_url || image?.url || "",
         source: "gallery",
       };
+      saveGenerationSettings();
       updateGenerationReferenceState();
       setView("generate", { focus: true });
       $("#detail-dialog")?.close();
@@ -1403,6 +1546,7 @@
     state.generation.submitting = true;
     $("#generation-submit").disabled = true;
     renderGenerationRequestSummary();
+    saveGenerationSettings();
     setGenerationStatus("送信中…");
     try {
       const referenceMode = generationReferenceMode();
@@ -2293,6 +2437,13 @@
       input.addEventListener("change", renderGenerationRequestSummary);
       input.addEventListener("change", updateGenerationAuthUi);
     }
+    for (const selector of generationSettingSelectors) {
+      const input = $(selector);
+      if (!input) continue;
+      input.addEventListener("input", scheduleGenerationSettingsSave);
+      input.addEventListener("change", scheduleGenerationSettingsSave);
+    }
+    $("#generation-reset").addEventListener("click", resetGenerationForm);
     updateGenerationReferenceState();
     updateGenerationVariationState();
     renderTagSearch();

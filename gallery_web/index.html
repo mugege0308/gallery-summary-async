@@ -107,6 +107,7 @@
         <div>
           <h2 id="generation-title">画像を生成</h2>
           <p class="generation-note">このPCから最大4枚の生成をGeneration Backendへ依頼します。画像は既存の同期処理でGalleryへ反映されます。</p>
+          <p class="generation-note">前回の入力設定を自動保存します。Reference画像は次回へ引き継ぎません。</p>
         </div>
         <span id="generation-capability" class="generation-capability" role="status">接続確認中…</span>
       </div>
@@ -245,6 +246,7 @@
       </div>
       <div class="generation-actions">
         <button id="generation-submit" class="button primary" type="button">生成する</button>
+        <button id="generation-reset" class="button secondary" type="button">入力をリセット</button>
         <span id="generation-status" class="generation-status" role="status">未実行</span>
       </div>
       <section id="generation-request-summary" class="generation-request-summary" hidden aria-live="polite">
@@ -449,6 +451,7 @@
   </dialog>
 
   <script src="/static/generation_poll_guard.js" defer></script>
+  <script src="/static/generation_settings.js" defer></script>
   <script src="/static/detail_viewer.js" defer></script>
   <script src="/static/app.js" defer></script>
 </body>
