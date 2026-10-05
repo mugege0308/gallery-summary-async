@@ -99,7 +99,7 @@
     return {
       character_preset: $("#generation-character-preset")?.value || "",
       freeform_character: $("#generation-freeform-character")?.value || "",
-      explicit_tags: $("#generation-explicit-tags")?.value || "",
+      explicit_tags: generationTags($("#generation-explicit-tags")?.value).join(", "),
       appearance_text: $("#generation-appearance")?.value || "",
       request_text: $("#generation-request")?.value || "",
       model_key: $("#generation-model")?.value || "",
@@ -982,11 +982,66 @@
   }
 
   function generationTags(value) {
-    return String(value || "").split(/[,\n]/).map((item) => item.trim()).filter(Boolean);
+    if (typeof GenerationTags !== "undefined") return GenerationTags.parse(value);
+    const tags = [];
+    const seen = new Set();
+    for (const item of String(value || "").split(/[,\n]/)) {
+      const tag = item.trim();
+      const key = normalizeGenerationTag(tag);
+      if (!tag || !key || seen.has(key)) continue;
+      seen.add(key);
+      tags.push(tag);
+    }
+    return tags;
   }
 
   function normalizeGenerationTag(value) {
+    if (typeof GenerationTags !== "undefined") return GenerationTags.normalize(value);
     return String(value || "").trim().replace(/[\s-]+/g, "_").toLowerCase();
+  }
+
+  function renderExplicitTagChips() {
+    const container = $("#generation-explicit-tags-chips");
+    const clearButton = $("#generation-explicit-tags-clear");
+    if (!container) return;
+    const tags = generationTags($("#generation-explicit-tags")?.value);
+    container.replaceChildren();
+    for (const tag of tags) {
+      const chip = document.createElement("span");
+      chip.className = "generation-explicit-tag-chip";
+      const text = document.createElement("span");
+      text.className = "generation-explicit-tag-text";
+      text.textContent = tag;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "generation-explicit-tag-remove";
+      remove.setAttribute("aria-label", tag + " を削除");
+      remove.textContent = "×";
+      remove.addEventListener("click", () => removeExplicitTag(tag));
+      chip.append(text, remove);
+      container.appendChild(chip);
+    }
+    if (clearButton) clearButton.hidden = tags.length < 2;
+  }
+
+  function removeExplicitTag(tag) {
+    const input = $("#generation-explicit-tags");
+    if (!input) return;
+    input.value = typeof GenerationTags !== "undefined"
+      ? GenerationTags.remove(input.value, tag)
+      : generationTags(input.value).filter((item) => normalizeGenerationTag(item) !== normalizeGenerationTag(tag)).join(", ");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    renderExplicitTagChips();
+  }
+
+  function clearExplicitTags() {
+    const input = $("#generation-explicit-tags");
+    if (!input) return;
+    input.value = "";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    renderExplicitTagChips();
   }
 
   function renderTagSearch() {
@@ -1233,7 +1288,7 @@
     const warnings = [];
     $("#generation-character-preset").value = "";
     $("#generation-freeform-character").value = saved.freeform_character;
-    $("#generation-explicit-tags").value = saved.explicit_tags;
+    $("#generation-explicit-tags").value = generationTags(saved.explicit_tags).join(", ");
     $("#generation-appearance").value = saved.appearance_text;
     $("#generation-request").value = saved.request_text;
     restoreGenerationSelect("#generation-character-preset", saved.character_preset, "Character preset", warnings);
@@ -1255,6 +1310,7 @@
     if (referenceFile) referenceFile.value = "";
     state.generation.restoreWarnings = warnings;
     updateGenerationReferenceState();
+    renderExplicitTagChips();
     renderGenerationRestoreStatus(warnings);
     renderGenerationRequestSummary();
     // Persist normalized catalog-safe values so removed LoRAs/presets do not
@@ -1290,6 +1346,7 @@
     setGenerationStatus("未実行");
     updateGenerationVariationState();
     updateGenerationReferenceState();
+    renderExplicitTagChips();
     renderTagSearch();
     renderGenerationRestoreStatus([]);
     renderGenerationRequestSummary();
@@ -1311,7 +1368,7 @@
 
       $("#generation-character-preset").value = "";
       $("#generation-freeform-character").value = settings.freeform_character || "";
-      $("#generation-explicit-tags").value = Array.isArray(settings.explicit_tags) ? settings.explicit_tags.join(", ") : "";
+      $("#generation-explicit-tags").value = generationTags(Array.isArray(settings.explicit_tags) ? settings.explicit_tags.join(", ") : "").join(", ");
       $("#generation-appearance").value = settings.appearance_text || "";
       $("#generation-request").value = settings.request_text || "";
       restoreGenerationSelect("#generation-character-preset", settings.character_preset, "Character preset", warnings);
@@ -1347,6 +1404,7 @@
 
       state.generation.restoreWarnings = warnings;
       updateGenerationReferenceState();
+      renderExplicitTagChips();
       renderGenerationRestoreStatus(warnings);
       renderGenerationRequestSummary();
       saveGenerationSettings();
@@ -2543,6 +2601,7 @@
     $("#generation-tag-search-add").addEventListener("click", addSelectedGenerationTags);
     $("#generation-tag-search-copy").addEventListener("click", copySelectedGenerationTags);
     $("#generation-tag-search-clear").addEventListener("click", clearGenerationTagSelection);
+    $("#generation-explicit-tags-clear").addEventListener("click", clearExplicitTags);
     $("#generation-tag-search-query").addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
@@ -2558,6 +2617,8 @@
       input.addEventListener("change", renderGenerationRequestSummary);
       input.addEventListener("change", updateGenerationAuthUi);
     }
+    $("#generation-explicit-tags").addEventListener("input", renderExplicitTagChips);
+    $("#generation-explicit-tags").addEventListener("change", renderExplicitTagChips);
     for (const selector of generationSettingSelectors) {
       const input = $(selector);
       if (!input) continue;
@@ -2567,6 +2628,7 @@
     $("#generation-reset").addEventListener("click", resetGenerationForm);
     updateGenerationReferenceState();
     updateGenerationVariationState();
+    renderExplicitTagChips();
     renderTagSearch();
     loadGenerationAuthStatus();
     for (const type of ["character", "style", "additional"]) {

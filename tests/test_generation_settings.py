@@ -13,6 +13,9 @@ class GenerationSettingsIntegrationTests(unittest.TestCase):
 
         self.assertIn('src="/static/generation_settings.js"', html)
         self.assertIn('id="generation-reset"', html)
+        self.assertIn('id="generation-explicit-tags-chips"', html)
+        self.assertIn('id="generation-explicit-tags-clear"', html)
+        self.assertIn('src="/static/generation_tags.js"', html)
         self.assertIn("前回の入力設定を自動保存します", html)
         self.assertIn('"gallery.generate.settings.v1"', helper)
         self.assertIn("GenerationSettings.write", app)
@@ -20,6 +23,24 @@ class GenerationSettingsIntegrationTests(unittest.TestCase):
         self.assertIn("GenerationSettings.clear", app)
         self.assertIn("restoreSavedGenerationSettings", app)
         self.assertIn('$("#generation-reset").addEventListener', app)
+
+    def test_explicit_tags_chips_use_textarea_as_source_of_truth(self) -> None:
+        html = (ROOT / "gallery_web" / "index.html").read_text(encoding="utf-8")
+        app = (ROOT / "gallery_web" / "app.js").read_text(encoding="utf-8")
+        css = (ROOT / "gallery_web" / "style.css").read_text(encoding="utf-8")
+
+        self.assertIn("function renderExplicitTagChips", app)
+        self.assertIn("function removeExplicitTag", app)
+        self.assertIn("function clearExplicitTags", app)
+        self.assertIn("remove.setAttribute(\"aria-label\"", app)
+        self.assertIn("GenerationTags.remove(input.value, tag)", app)
+        self.assertIn('generationTags($("#generation-explicit-tags")?.value)', app)
+        self.assertIn('generationTags(saved.explicit_tags).join(", ")', app)
+        self.assertIn("renderExplicitTagChips()", app)
+        self.assertIn("generation-explicit-tag-chip", css)
+        self.assertIn("generation-explicit-tag-remove", css)
+        self.assertIn("flex-wrap: wrap", css)
+        self.assertIn("overflow-wrap: anywhere", css)
 
     def test_only_allowed_form_fields_are_persisted(self) -> None:
         app = (ROOT / "gallery_web" / "app.js").read_text(encoding="utf-8")

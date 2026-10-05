@@ -81,6 +81,7 @@ main { max-width: 1680px; margin: 0 auto; padding: 22px clamp(12px, 3vw, 42px) 4
 .generation-grid textarea { width: 100%; min-height: 38px; padding: 7px 10px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; outline: none; background: var(--panel-2); color: var(--text); font: inherit; }
 .generation-grid textarea:focus { border-color: var(--accent); }
 .generation-grid > * { min-width: 0; }
+.generation-explicit-tags-field { display: grid; align-content: start; gap: 0; min-width: 0; }
 .generation-field-help { color: var(--muted); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
 .generation-tag-search { display: grid; gap: 8px; min-width: 0; align-content: end; }
 .generation-tag-search > .button { min-height: 42px; }
@@ -96,6 +97,12 @@ main { max-width: 1680px; margin: 0 auto; padding: 22px clamp(12px, 3vw, 42px) 4
 .generation-tag-result small { color: var(--muted); font-size: 10px; text-align: right; white-space: normal; overflow-wrap: anywhere; }
 .generation-tag-search-selected { display: flex; flex-wrap: wrap; gap: 5px; min-height: 24px; color: var(--muted); font-size: 11px; }
 .generation-tag-chip { padding: 4px 7px; border: 1px solid #53699e; border-radius: 999px; background: #20283a; color: #dce6ff; overflow-wrap: anywhere; }
+.generation-explicit-tags-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; margin-top: 6px; }
+.generation-explicit-tag-chip { display: inline-flex; align-items: center; max-width: 100%; min-width: 0; padding-left: 9px; border: 1px solid #53699e; border-radius: 999px; background: #20283a; color: #dce6ff; }
+.generation-explicit-tag-text { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+.generation-explicit-tag-remove { flex: 0 0 40px; min-width: 40px; min-height: 40px; margin-left: 3px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font-size: 20px; line-height: 1; }
+.generation-explicit-tag-remove:hover, .generation-explicit-tag-remove:focus-visible { background: #53699e; color: var(--text); }
+.generation-explicit-tags-clear { min-height: 36px; margin-top: 6px; padding: 5px 9px; font-size: 12px; }
 .generation-reference-help-wrap { display: grid; align-content: end; gap: 3px; min-width: 0; padding: 4px 2px 5px; }
 .generation-reference-mode-hint { color: var(--text); font-size: 12px; font-weight: 600; }
 .generation-reference-help { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }

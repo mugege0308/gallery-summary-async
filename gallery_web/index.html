@@ -130,10 +130,14 @@
           <input id="generation-freeform-character" type="text" placeholder="かわいい女の子">
           <small class="generation-field-help">登録キャラ名、または「かわいい女の子」など。</small>
         </label>
-        <label>追加タグ
-          <textarea id="generation-explicit-tags" rows="2" placeholder="portrait, upper body"></textarea>
-          <small class="generation-field-help">Danbooruなどで調べたタグを入力。例: smile, looking at viewer, hands on cheeks</small>
-        </label>
+        <div class="generation-explicit-tags-field">
+          <label>追加タグ
+            <textarea id="generation-explicit-tags" rows="2" placeholder="portrait, upper body"></textarea>
+            <small class="generation-field-help">Danbooruなどで調べたタグを入力。例: smile, looking at viewer, hands on cheeks</small>
+          </label>
+          <div id="generation-explicit-tags-chips" class="generation-explicit-tags-chips" aria-label="追加タグ一覧" aria-live="polite"></div>
+          <button id="generation-explicit-tags-clear" class="button secondary generation-explicit-tags-clear" type="button" hidden>すべて削除</button>
+        </div>
         <div class="generation-tag-search">
           <button id="generation-tag-search-toggle" class="button secondary" type="button" aria-expanded="false">タグを探す</button>
           <section id="generation-tag-search-panel" class="generation-tag-search-panel" hidden aria-label="タグ検索">
@@ -459,6 +463,7 @@
 
   <script src="/static/generation_poll_guard.js" defer></script>
   <script src="/static/generation_settings.js" defer></script>
+  <script src="/static/generation_tags.js" defer></script>
   <script src="/static/generation_continuation.js" defer></script>
   <script src="/static/detail_viewer.js" defer></script>
   <script src="/static/app.js" defer></script>
