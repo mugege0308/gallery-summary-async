@@ -2,7 +2,9 @@
 param(
     [Parameter(Position = 0)]
     [string]$ImagesRoot = "",
-    [int]$Port = 8765
+    [int]$Port = 8765,
+    [string]$BackendLauncher = "",
+    [switch]$NoBrowser
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,6 +15,7 @@ $PidFile = Join-Path $PidDirectory "gallery_server.pid.json"
 $AccessInfoFile = Join-Path $PidDirectory "access_urls.txt"
 $ImagesRootFile = Join-Path $PidDirectory "images_root.txt"
 $MutexName = "Local\CodexLocalImageGalleryLauncher"
+$BackendUrl = "http://127.0.0.1:8787"
 $GallerySecretEnvironmentNames = @(
     "GALLERY_GENERATION_AUTH_TOKEN",
     "GALLERY_GENERATION_SESSION_SECRET"
@@ -41,6 +44,64 @@ function Test-GalleryReady {
     } catch {
         return $false
     }
+}
+
+function Test-BackendReady {
+    try {
+        $response = Invoke-RestMethod -UseBasicParsing -Uri "$BackendUrl/api/generation/health" -TimeoutSec 2
+        return (
+            $response.service_ready -eq $true -and
+            $response.lm_studio_configured -eq $true -and
+            $response.comfyui_url_configured -eq $true
+        )
+    } catch {
+        return $false
+    }
+}
+
+function Resolve-BackendLauncher {
+    if (-not [string]::IsNullOrWhiteSpace($BackendLauncher)) {
+        return (Resolve-Path -LiteralPath $BackendLauncher -ErrorAction Stop).Path
+    }
+
+    $configured = [Environment]::GetEnvironmentVariable("GENERATION_BACKEND_LAUNCHER", "Process")
+    if ([string]::IsNullOrWhiteSpace($configured)) {
+        $configured = [Environment]::GetEnvironmentVariable("GENERATION_BACKEND_LAUNCHER", "User")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($configured) -and (Test-Path -LiteralPath $configured)) {
+        return (Resolve-Path -LiteralPath $configured).Path
+    }
+
+    $probeRoot = $ProjectRoot
+    for ($level = 0; $level -lt 4; $level++) {
+        $siblingLauncher = Join-Path $probeRoot "discord-bot-rebuild\launch_generation_backend.ps1"
+        if (Test-Path -LiteralPath $siblingLauncher) {
+            return (Resolve-Path -LiteralPath $siblingLauncher).Path
+        }
+        $nextRoot = Split-Path -Parent $probeRoot
+        if ($nextRoot -eq $probeRoot) { break }
+        $probeRoot = $nextRoot
+    }
+    return $null
+}
+
+function Ensure-BackendReady {
+    if (Test-BackendReady) { return }
+
+    $launcherPath = Resolve-BackendLauncher
+    if ([string]::IsNullOrWhiteSpace($launcherPath)) {
+        throw "Generation Backend is offline and no dedicated Backend launcher was found."
+    }
+
+    $powershell = (Get-Command powershell.exe -ErrorAction Stop).Source
+    & $powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $launcherPath
+    if ($LASTEXITCODE -ne 0 -or -not (Test-BackendReady)) {
+        throw "Generation Backend did not become healthy; Gallery startup was not continued."
+    }
+}
+
+function Open-GalleryIfRequested {
+    if (-not $NoBrowser) { Start-Process $GalleryUrl }
 }
 
 function Wait-GalleryReady {
@@ -141,13 +202,16 @@ try {
 
     if (-not $mutexAcquired) {
         # Another launcher is already starting the server. Do not create a duplicate.
-        if (Wait-GalleryReady) { Write-AccessInfo; Start-Process $GalleryUrl }
+        Ensure-BackendReady
+        if (Wait-GalleryReady) { Write-AccessInfo; Open-GalleryIfRequested }
         exit 0
     }
 
+    Ensure-BackendReady
+
     if (Test-GalleryReady) {
         Write-AccessInfo
-        Start-Process $GalleryUrl
+        Open-GalleryIfRequested
         exit 0
     }
 
@@ -185,7 +249,7 @@ try {
 
     if (Wait-GalleryReady) {
         Write-AccessInfo
-        Start-Process $GalleryUrl
+        Open-GalleryIfRequested
         exit 0
     }
 
