@@ -766,6 +766,23 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
             return None
         return f"{prefix}{bulk_id}{suffix}"
 
+    def _generation_overnight_path(self, path: str, *, action: str = "") -> str | None:
+        prefix = "/api/generation/overnight-jobs/"
+        if not path.startswith(prefix):
+            return None
+        raw = path[len(prefix):]
+        suffix = f"/{action}" if action else ""
+        if action:
+            if not raw.endswith(suffix):
+                return None
+            raw = raw[: -len(suffix)]
+        elif any(raw.endswith(f"/{candidate}") for candidate in ("pause", "resume", "stop")):
+            return None
+        overnight_id = unquote(raw)
+        if not _GENERATION_JOB_ID_RE.fullmatch(overnight_id):
+            return None
+        return f"{prefix}{overnight_id}{suffix}"
+
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         parsed = urlsplit(self.path)
         path = parsed.path
@@ -806,6 +823,11 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
                 if not self._require_generation_access():
                     return None
                 return self._proxy_generation_json("GET", generation_bulk_path)
+            generation_overnight_path = self._generation_overnight_path(path)
+            if generation_overnight_path is not None:
+                if not self._require_generation_access():
+                    return None
+                return self._proxy_generation_json("GET", generation_overnight_path)
             if path == "/" or path == "/index.html":
                 return self._serve_index()
             if path.startswith("/static/"):
@@ -1177,6 +1199,24 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
                     return self._send_error_json("Content-Type: application/json が必要です。", HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
                 payload = self._request_json(max_body_bytes=self.generation_max_body_bytes)
                 return self._proxy_generation_json("POST", generation_bulk_stop_path or generation_bulk_path, payload)
+            for action in ("pause", "resume", "stop"):
+                generation_overnight_action_path = self._generation_overnight_path(path, action=action)
+                if generation_overnight_action_path is not None:
+                    if not self._require_generation_access(mutation=True):
+                        return None
+                    content_type = self.headers.get("Content-Type", "").casefold()
+                    if not content_type.startswith("application/json"):
+                        return self._send_error_json("Content-Type: application/json が必要です。", HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+                    payload = self._request_json(max_body_bytes=self.generation_max_body_bytes)
+                    return self._proxy_generation_json("POST", generation_overnight_action_path, payload)
+            if path == "/api/generation/overnight-jobs":
+                if not self._require_generation_access(mutation=True):
+                    return None
+                content_type = self.headers.get("Content-Type", "").casefold()
+                if not content_type.startswith("application/json"):
+                    return self._send_error_json("Content-Type: application/json が必要です。", HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+                payload = self._request_json(max_body_bytes=self.generation_max_body_bytes)
+                return self._proxy_generation_json("POST", "/api/generation/overnight-jobs", payload)
             if path == "/api/generation/references":
                 if not self._require_generation_access(
                     mutation=True,

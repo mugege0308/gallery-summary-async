@@ -49,6 +49,16 @@
         selectedVariationIndexes: [],
         selectedOnly: false,
       },
+      overnight: {
+        jobId: "",
+        pollTimer: null,
+        submitting: false,
+        pausing: false,
+        resuming: false,
+        stopping: false,
+        sequence: 0,
+        lastOutput: null,
+      },
       reference: { imageId: "", fileName: "", previewUrl: "", source: "" },
       tagSearch: { selected: [], results: [], query: "", category: "all", warning: "" },
       restoreWarnings: [],
@@ -1872,6 +1882,188 @@
     }
   }
 
+  function stopOvernightGenerationPolling() {
+    if (state.generation.overnight.pollTimer) {
+      clearTimeout(state.generation.overnight.pollTimer);
+      state.generation.overnight.pollTimer = null;
+    }
+  }
+
+  function overnightStorage() {
+    try { return window.localStorage; } catch (_error) { return null; }
+  }
+
+  function renderOvernightResults(data, overnightId) {
+    const container = $("#generation-overnight-results");
+    if (!container) return;
+    const finalSelected = Array.isArray(data?.final_selected) ? data.final_selected : [];
+    const rounds = Array.isArray(data?.rounds) ? data.rounds : [];
+    container.replaceChildren();
+    const summary = document.createElement("p");
+    summary.textContent = `生成 ${Number(data?.generated_count || 0)} / ${Number(data?.total_requested || 0)}、失敗 ${Number(data?.failed_count || 0)}、Round Best ${Number(data?.round_best_count || 0)}、Final Best ${finalSelected.length}`;
+    container.append(summary);
+    if (finalSelected.length) {
+      const finalNames = finalSelected
+        .map((item) => String(item?.filename || ""))
+        .filter(Boolean);
+      const finalInfo = document.createElement("p");
+      finalInfo.textContent = `Final Best4: ${finalNames.join(" / ")}`;
+      container.append(finalInfo);
+      const finalButton = document.createElement("button");
+      finalButton.className = "button secondary";
+      finalButton.type = "button";
+      finalButton.textContent = "Final Best4だけを見る";
+      finalButton.addEventListener("click", () => {
+        state.generation.bulk.selectedFilenames = finalNames;
+        state.generation.bulk.selectedVariationIndexes = [];
+        state.generation.bulk.selectedOnly = true;
+        setView("gallery");
+        render();
+        setMessage("Final Best4だけを表示しています。『全画像に戻る』で解除できます。");
+      });
+      container.append(finalButton);
+    }
+    if (rounds.length) {
+      const roundInfo = document.createElement("span");
+      roundInfo.textContent = `完了ラウンド ${rounds.filter((round) => round?.generation_finished_at).length} / ${Number(data?.total_rounds || 0)}`;
+      container.append(roundInfo);
+    }
+    const allLink = document.createElement("a");
+    allLink.className = "button secondary";
+    allLink.href = generationResultUrl(overnightId);
+    allLink.textContent = "全画像を見る";
+    container.append(allLink);
+    container.hidden = false;
+  }
+
+  function updateOvernightButtons(data = state.generation.overnight.lastOutput || {}) {
+    const stateValue = String(data?.state || "");
+    const active = ["queued", "running", "selecting", "stopping"].includes(stateValue);
+    const start = $("#generation-overnight-start");
+    const pause = $("#generation-overnight-pause");
+    const resume = $("#generation-overnight-resume");
+    const stop = $("#generation-overnight-stop");
+    if (start) start.disabled = active || Boolean(state.generation.overnight.submitting) || Boolean(state.generation.submitting);
+    if (pause) pause.disabled = !active || stateValue === "stopping" || Boolean(state.generation.overnight.pausing);
+    if (resume) resume.disabled = !["paused", "paused_error"].includes(stateValue) || Boolean(state.generation.overnight.resuming);
+    if (stop) stop.disabled = !active || Boolean(state.generation.overnight.stopping);
+  }
+
+  async function pollOvernightGeneration(overnightId, sequence) {
+    if (state.generation.overnight.jobId !== overnightId || state.generation.overnight.sequence !== sequence) return;
+    try {
+      const response = await fetch(`/api/generation/overnight-jobs/${encodeURIComponent(overnightId)}`, { cache: "no-store" });
+      const data = await response.json();
+      if (state.generation.overnight.jobId !== overnightId || state.generation.overnight.sequence !== sequence) return;
+      if (!response.ok || data.ok === false) throw new Error(data.error || "夜間生成状態を取得できません。");
+      state.generation.overnight.lastOutput = data;
+      const total = Number(data.total_requested || 0);
+      const generated = Number(data.generated_count || 0);
+      const failed = Number(data.failed_count || 0);
+      const current = Number(data.current_slot || 1);
+      const round = Number(data.current_round || 1);
+      const stateLabel = { queued: "Queued", running: "Generating", selecting: "AI選別中", paused: "Paused", paused_error: "Paused (error)", stopping: "Stopping", stopped: "Stopped", completed: "Completed", completed_selection_failed: "Completed (selection failed)", failed: "Failed" }[data.state] || data.state || "Unknown";
+      const suffix = data.state === "selecting" ? "" : ` / Round ${round} / slot ${Math.min(current, 32)} / ${total}`;
+      $("#generation-overnight-status").textContent = `${stateLabel} ${generated} / ${total}${failed ? ` / Failed ${failed}` : ""}${suffix}`;
+      updateOvernightButtons(data);
+      if (["completed", "completed_selection_failed", "failed", "stopped"].includes(data.state)) {
+        stopOvernightGenerationPolling();
+        state.generation.overnight.submitting = false;
+        renderOvernightResults(data, overnightId);
+        const storage = overnightStorage();
+        try { storage?.setItem("gallery.generation.overnight_job_id", overnightId); } catch (_error) { /* best effort */ }
+        setMessage(data.state === "completed" ? "夜間生成が完了しました。" : `夜間生成は${stateLabel}になりました。`, data.state === "failed");
+        updateOvernightButtons(data);
+        await load({ page: 1 });
+        return;
+      }
+      state.generation.overnight.pollTimer = setTimeout(() => pollOvernightGeneration(overnightId, sequence), 2000);
+    } catch (error) {
+      if (state.generation.overnight.jobId !== overnightId || state.generation.overnight.sequence !== sequence) return;
+      stopOvernightGenerationPolling();
+      state.generation.overnight.submitting = false;
+      $("#generation-overnight-status").textContent = error.message || String(error);
+      setMessage(error.message || String(error), true);
+      updateOvernightButtons({ state: "" });
+    }
+  }
+
+  async function startOvernightGeneration() {
+    if (state.generation.overnight.submitting || state.generation.submitting || state.generation.bulk.submitting) return;
+    if (state.generation.auth.required && !state.generation.auth.authenticated) {
+      setGenerationStatus("リモート生成キーで認証してください。", true);
+      return;
+    }
+    state.generation.overnight.sequence += 1;
+    const sequence = state.generation.overnight.sequence;
+    state.generation.overnight.submitting = true;
+    state.generation.overnight.lastOutput = null;
+    stopOvernightGenerationPolling();
+    updateOvernightButtons({ state: "queued" });
+    $("#generation-overnight-status").textContent = "送信中…";
+    saveGenerationSettings();
+    try {
+      const referenceMode = generationReferenceMode();
+      if (referenceMode !== "none") $("#generation-overnight-status").textContent = "参考画像を登録中…";
+      const referenceImageId = await uploadGenerationReference();
+      const payload = JSON.parse(JSON.stringify(generationPayload(referenceImageId)));
+      payload.total_count = Number($("#generation-overnight-count")?.value || 256);
+      const response = await fetch("/api/generation/overnight-jobs", {
+        method: "POST",
+        headers: generationMutationHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!response.ok || data.ok === false) throw new Error(data.error || "夜間生成を開始できません。");
+      if (!data.overnight_job_id) throw new Error("夜間生成job_idがありません。");
+      state.generation.overnight.jobId = data.overnight_job_id;
+      try { overnightStorage()?.setItem("gallery.generation.overnight_job_id", data.overnight_job_id); } catch (_error) { /* best effort */ }
+      await pollOvernightGeneration(data.overnight_job_id, sequence);
+    } catch (error) {
+      state.generation.overnight.submitting = false;
+      $("#generation-overnight-status").textContent = error.message || String(error);
+      setMessage(error.message || String(error), true);
+      updateOvernightButtons({ state: "" });
+    }
+  }
+
+  async function sendOvernightAction(action) {
+    const overnightId = state.generation.overnight.jobId;
+    if (!overnightId) return;
+    const flag = action === "pause" ? "pausing" : action === "resume" ? "resuming" : "stopping";
+    state.generation.overnight[flag] = true;
+    updateOvernightButtons(state.generation.overnight.lastOutput || {});
+    try {
+      const response = await fetch(`/api/generation/overnight-jobs/${encodeURIComponent(overnightId)}/${action}`, {
+        method: "POST",
+        headers: generationMutationHeaders({ "Content-Type": "application/json" }),
+        body: "{}",
+      });
+      const data = await response.json();
+      if (!response.ok || data.ok === false) throw new Error(data.error || `夜間生成を${action}できません。`);
+      state.generation.overnight.lastOutput = data;
+      $("#generation-overnight-status").textContent = action === "pause" ? "一時停止を要求しました。現在の画像後に停止します。" : action === "stop" ? "停止を要求しました。現在の画像後に終了します。" : "再開しました。";
+      updateOvernightButtons(data);
+      if (action === "resume") await pollOvernightGeneration(overnightId, state.generation.overnight.sequence);
+    } catch (error) {
+      setMessage(error.message || String(error), true);
+    } finally {
+      state.generation.overnight[flag] = false;
+      updateOvernightButtons(state.generation.overnight.lastOutput || {});
+    }
+  }
+
+  function restoreOvernightJobState() {
+    let overnightId = "";
+    try { overnightId = overnightStorage()?.getItem("gallery.generation.overnight_job_id") || ""; } catch (_error) { overnightId = ""; }
+    if (!overnightId) return;
+    state.generation.overnight.jobId = overnightId;
+    state.generation.overnight.sequence += 1;
+    const panel = $("#generation-overnight-panel");
+    if (panel) panel.open = true;
+    pollOvernightGeneration(overnightId, state.generation.overnight.sequence);
+  }
+
   function submitSameSettingsFourMore() {
     if (state.generation.submitting || !state.generation.lastCompletedRequest) return;
     if (typeof GenerationContinuation === "undefined") return;
@@ -2813,6 +3005,10 @@
     $("#generation-submit").addEventListener("click", () => submitGeneration());
     $("#generation-bulk-start").addEventListener("click", startBulkGeneration);
     $("#generation-bulk-stop").addEventListener("click", stopBulkGeneration);
+    $("#generation-overnight-start").addEventListener("click", startOvernightGeneration);
+    $("#generation-overnight-pause").addEventListener("click", () => sendOvernightAction("pause"));
+    $("#generation-overnight-resume").addEventListener("click", () => sendOvernightAction("resume"));
+    $("#generation-overnight-stop").addEventListener("click", () => sendOvernightAction("stop"));
     $("#generation-auth-submit").addEventListener("click", unlockGeneration);
     $("#generation-auth-logout").addEventListener("click", logoutGeneration);
     $("#generation-count").addEventListener("change", updateGenerationVariationState);
@@ -2859,7 +3055,7 @@
     updateGenerationVariationState();
     renderExplicitTagChips();
     renderTagSearch();
-    loadGenerationAuthStatus();
+    loadGenerationAuthStatus().finally(() => restoreOvernightJobState());
     for (const type of ["character", "style", "additional"]) {
       $(`#generation-${type}-lora`).addEventListener("change", () => {
         updateGenerationLoraDefault(type);

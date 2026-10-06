@@ -280,6 +280,28 @@
         </div>
         <div id="generation-bulk-results" class="generation-bulk-results" hidden></div>
       </details>
+      <details id="generation-overnight-panel" class="generation-bulk-panel generation-overnight-panel">
+        <summary>夜間生成</summary>
+        <p class="generation-field-help">32枚ずつ順番に生成し、各ラウンドをBest4に選別します。開始時の設定を固定します。</p>
+        <div class="generation-bulk-controls">
+          <label>総生成枚数
+            <select id="generation-overnight-count">
+              <option value="128">128</option>
+              <option value="256" selected>256</option>
+              <option value="512">512</option>
+            </select>
+          </label>
+          <span class="generation-field-help">各ラウンド: 32枚 / 各ラウンド選別: Best4 / 最終選別: Best4</span>
+        </div>
+        <div class="generation-bulk-actions">
+          <button id="generation-overnight-start" class="button secondary" type="button">夜間生成を開始</button>
+          <button id="generation-overnight-pause" class="button secondary" type="button" disabled>一時停止</button>
+          <button id="generation-overnight-resume" class="button secondary" type="button" disabled>再開</button>
+          <button id="generation-overnight-stop" class="button secondary" type="button" disabled>停止</button>
+          <span id="generation-overnight-status" class="generation-status" role="status">未実行</span>
+        </div>
+        <div id="generation-overnight-results" class="generation-bulk-results" hidden></div>
+      </details>
       <section id="generation-request-summary" class="generation-request-summary" hidden aria-live="polite">
         <strong>今回の送信設定</strong>
         <dl id="generation-request-summary-list" class="generation-summary-list"></dl>
