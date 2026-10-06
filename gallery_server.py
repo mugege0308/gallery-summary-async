@@ -749,6 +749,23 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
             return None
         return f"{prefix}{job_id}"
 
+    def _generation_bulk_path(self, path: str, *, stop: bool = False) -> str | None:
+        prefix = "/api/generation/bulk-jobs/"
+        if not path.startswith(prefix):
+            return None
+        suffix = "/stop" if stop else ""
+        raw_id = path[len(prefix):]
+        if stop:
+            if not raw_id.endswith(suffix):
+                return None
+            raw_id = raw_id[: -len(suffix)]
+        elif raw_id.endswith("/stop"):
+            return None
+        bulk_id = unquote(raw_id)
+        if not _GENERATION_JOB_ID_RE.fullmatch(bulk_id):
+            return None
+        return f"{prefix}{bulk_id}{suffix}"
+
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         parsed = urlsplit(self.path)
         path = parsed.path
@@ -784,6 +801,11 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
                 if not self._require_generation_access():
                     return None
                 return self._proxy_generation_json("GET", generation_job_path)
+            generation_bulk_path = self._generation_bulk_path(path)
+            if generation_bulk_path is not None:
+                if not self._require_generation_access():
+                    return None
+                return self._proxy_generation_json("GET", generation_bulk_path)
             if path == "/" or path == "/index.html":
                 return self._serve_index()
             if path.startswith("/static/"):
@@ -1137,6 +1159,24 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
                     return self._send_error_json("Content-Type: application/json が必要です。", HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
                 payload = self._request_json(max_body_bytes=self.generation_max_body_bytes)
                 return self._proxy_generation_json("POST", path, payload)
+            if path == "/api/generation/bulk-jobs":
+                if not self._require_generation_access(mutation=True):
+                    return None
+                content_type = self.headers.get("Content-Type", "").casefold()
+                if not content_type.startswith("application/json"):
+                    return self._send_error_json("Content-Type: application/json が必要です。", HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+                payload = self._request_json(max_body_bytes=self.generation_max_body_bytes)
+                return self._proxy_generation_json("POST", path, payload)
+            generation_bulk_path = self._generation_bulk_path(path)
+            generation_bulk_stop_path = self._generation_bulk_path(path, stop=True)
+            if generation_bulk_path is not None or generation_bulk_stop_path is not None:
+                if not self._require_generation_access(mutation=True):
+                    return None
+                content_type = self.headers.get("Content-Type", "").casefold()
+                if not content_type.startswith("application/json"):
+                    return self._send_error_json("Content-Type: application/json が必要です。", HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+                payload = self._request_json(max_body_bytes=self.generation_max_body_bytes)
+                return self._proxy_generation_json("POST", generation_bulk_stop_path or generation_bulk_path, payload)
             if path == "/api/generation/references":
                 if not self._require_generation_access(
                     mutation=True,

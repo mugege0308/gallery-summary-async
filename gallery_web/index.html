@@ -106,7 +106,7 @@
       <div class="generation-head">
         <div>
           <h2 id="generation-title">画像を生成</h2>
-          <p class="generation-note">このPCから最大4枚の生成をGeneration Backendへ依頼します。画像は既存の同期処理でGalleryへ反映されます。</p>
+          <p class="generation-note">通常生成は1〜8枚を1枚ずつGeneration Backendへ依頼します。16枚以上は「大量生成」から実行できます。</p>
           <p class="generation-note">前回の入力設定を自動保存します。Reference画像は次回へ引き継ぎません。</p>
         </div>
         <span id="generation-capability" class="generation-capability" role="status">接続確認中…</span>
@@ -254,6 +254,32 @@
         <button id="generation-reset" class="button secondary" type="button">入力をリセット</button>
         <span id="generation-status" class="generation-status" role="status">未実行</span>
       </div>
+      <details id="generation-bulk-panel" class="generation-bulk-panel">
+        <summary>大量生成（16 / 24 / 32枚）</summary>
+        <p class="generation-field-help">現在の設定を固定して1枚ずつ生成します。フォームを変更しても実行中の設定は変わりません。</p>
+        <div class="generation-bulk-controls">
+          <label>合計枚数
+            <select id="generation-bulk-count">
+              <option value="16">16</option>
+              <option value="24">24</option>
+              <option value="32">32</option>
+            </select>
+          </label>
+          <label>AI選別
+            <select id="generation-bulk-selection">
+              <option value="none">なし（全画像を保持）</option>
+              <option value="best1">Best 1</option>
+              <option value="best4">Best 4</option>
+            </select>
+          </label>
+        </div>
+        <div class="generation-bulk-actions">
+          <button id="generation-bulk-start" class="button secondary" type="button">大量生成を開始</button>
+          <button id="generation-bulk-stop" class="button secondary" type="button" disabled>停止（現在の1枚後）</button>
+          <span id="generation-bulk-status" class="generation-status" role="status">未実行</span>
+        </div>
+        <div id="generation-bulk-results" class="generation-bulk-results" hidden></div>
+      </details>
       <section id="generation-request-summary" class="generation-request-summary" hidden aria-live="polite">
         <strong>今回の送信設定</strong>
         <dl id="generation-request-summary-list" class="generation-summary-list"></dl>

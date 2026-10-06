@@ -44,6 +44,8 @@ class FakeGenerationBackendHandler(BaseHTTPRequestHandler):
             )
         if self.path == "/api/generation/jobs/job-1":
             return self._json({"job_id": "job-1", "state": "completed", "progress": 1.0, "output": {"image_count": 1}})
+        if self.path == "/api/generation/bulk-jobs/bulk-1":
+            return self._json({"bulk_id": "bulk-1", "state": "completed", "requested_total": 16, "completed_count": 16, "failed_count": 0})
         if self.path == "/api/generation/health":
             return self._json({"service_ready": True})
         if urlsplit(self.path).path == "/api/generation/tags/search":
@@ -181,6 +183,20 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertEqual(value["job_id"], "job-1")
         self.assertEqual(FakeGenerationBackendHandler.last_payload, payload)
         self.assertNotIn(r"C:\private", json.dumps(value))
+
+    def test_localhost_bulk_post_and_poll_are_forwarded(self) -> None:
+        payload = {"total_count": 16, "selection_mode": "best4", "count": 1}
+        status, value = self.request("POST", "/api/generation/bulk-jobs", payload)
+        self.assertEqual(status, 202)
+        self.assertEqual(value["job_id"], "job-1")
+        status, value = self.request("GET", "/api/generation/bulk-jobs/bulk-1")
+        self.assertEqual(status, 200)
+        self.assertEqual(value["bulk_id"], "bulk-1")
+
+    def test_bulk_stop_is_forwarded(self) -> None:
+        status, value = self.request("POST", "/api/generation/bulk-jobs/bulk-1/stop", {})
+        self.assertEqual(status, 202)
+        self.assertEqual(value["job_id"], "job-1")
 
     def test_localhost_reference_upload_forwards_multipart(self) -> None:
         boundary = "----codex-reference"
@@ -745,6 +761,12 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn('id="generation-copy-job-id"', html)
         self.assertIn('id="generation-result-link"', html)
         self.assertIn('id="generation-more-four"', html)
+        self.assertIn('id="generation-bulk-panel"', html)
+        self.assertIn('id="generation-bulk-count"', html)
+        self.assertIn('id="generation-bulk-selection"', html)
+        self.assertIn('id="generation-bulk-start"', html)
+        self.assertIn('id="generation-bulk-stop"', html)
+        self.assertIn('id="generation-bulk-results"', html)
         self.assertIn('src="/static/generation_continuation.js"', html)
         self.assertIn('data-view-target="gallery"', html)
         self.assertIn('data-view-target="generate"', html)
@@ -812,6 +834,16 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn('renderGenerationResultSummary', app)
         self.assertIn('navigator.clipboard', app)
         self.assertIn('generationResultUrl', app)
+        self.assertIn('/api/generation/bulk-jobs', app)
+        self.assertIn('startBulkGeneration', app)
+        self.assertIn('pollBulkGeneration', app)
+        self.assertIn('stopBulkGeneration', app)
+        self.assertIn('selection_mode', app)
+        self.assertIn('選別結果だけを見る', app)
+        self.assertIn('selectedOnly', app)
+        self.assertIn('selectedFilenames', app)
+        self.assertIn('selectedVariationIndexes', app)
+        self.assertIn('selectedVariationIndexesFromBulk', app)
         self.assertIn('function setView', app)
         self.assertIn('function renderRecent', app)
         self.assertIn('async function loadRecent', app)
@@ -865,6 +897,8 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn('min-height: 42px', css)
         self.assertIn('generation-job-id', css)
         self.assertIn('@media (max-width: 560px)', css)
+        self.assertIn('.generation-bulk-panel', css)
+        self.assertIn('.generation-bulk-controls', css)
         self.assertIn('.view-tabs', css)
         self.assertIn('.recent-panel', css)
         self.assertIn('.generation-field-help', css)

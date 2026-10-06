@@ -37,6 +37,18 @@
       lastRequest: null,
       lastCompletedRequest: null,
       lastOutput: null,
+      bulk: {
+        bulkId: "",
+        pollTimer: null,
+        submitting: false,
+        stopping: false,
+        sequence: 0,
+        lastRequest: null,
+        lastOutput: null,
+        selectedFilenames: [],
+        selectedVariationIndexes: [],
+        selectedOnly: false,
+      },
       reference: { imageId: "", fileName: "", previewUrl: "", source: "" },
       tagSearch: { selected: [], results: [], query: "", category: "all", warning: "" },
       restoreWarnings: [],
@@ -793,6 +805,7 @@
     const tokenInput = $("#generation-auth-token");
     const rememberInput = $("#generation-auth-remember");
     const generationSubmit = $("#generation-submit");
+    const bulkStart = $("#generation-bulk-start");
     if (!capability || !authStatus || !authSubmit || !authLogout || !tokenInput || !rememberInput || !generationSubmit) return;
     const tokenLabel = tokenInput.closest("label");
     const rememberLabel = rememberInput.closest("label");
@@ -806,6 +819,7 @@
       if (tokenLabel) tokenLabel.hidden = true;
       if (rememberLabel) rememberLabel.hidden = true;
       generationSubmit.disabled = Boolean(state.generation.submitting) || generationHasReferenceLoraConflict();
+      if (bulkStart) bulkStart.disabled = Boolean(state.generation.bulk.submitting) || Boolean(state.generation.submitting) || generationHasReferenceLoraConflict();
       return;
     }
     if (auth.authenticated) {
@@ -820,6 +834,7 @@
       if (tokenLabel) tokenLabel.hidden = true;
       if (rememberLabel) rememberLabel.hidden = true;
       generationSubmit.disabled = Boolean(state.generation.submitting) || generationHasReferenceLoraConflict();
+      if (bulkStart) bulkStart.disabled = Boolean(state.generation.bulk.submitting) || Boolean(state.generation.submitting) || generationHasReferenceLoraConflict();
     } else {
       capability.textContent = "リモート生成は認証が必要です";
       capability.classList.remove("ready");
@@ -830,6 +845,7 @@
       if (tokenLabel) tokenLabel.hidden = false;
       if (rememberLabel) rememberLabel.hidden = false;
       generationSubmit.disabled = true;
+      if (bulkStart) bulkStart.disabled = true;
     }
   }
 
@@ -1587,6 +1603,7 @@
         stopGenerationPolling();
         state.generation.submitting = false;
         $("#generation-submit").disabled = false;
+        updateGenerationAuthUi();
         state.generation.lastCompletedRequest = state.generation.lastRequest
           ? JSON.parse(JSON.stringify(state.generation.lastRequest))
           : null;
@@ -1603,6 +1620,7 @@
         stopGenerationPolling();
         state.generation.submitting = false;
         $("#generation-submit").disabled = false;
+        updateGenerationAuthUi();
         renderGenerationResultSummary(data, jobId);
         setGenerationStatus(`${data.state} / ${data.error_summary || "生成に失敗しました。"} / job_id=${jobId}`, true);
         return;
@@ -1613,12 +1631,13 @@
       stopGenerationPolling();
       state.generation.submitting = false;
       $("#generation-submit").disabled = false;
+      updateGenerationAuthUi();
       setGenerationStatus(error.message || String(error), true);
     }
   }
 
   async function submitGeneration(requestOverride = null) {
-    if (state.generation.submitting) return;
+    if (state.generation.submitting || state.generation.bulk.submitting) return;
     if (state.generation.auth.required && !state.generation.auth.authenticated) {
       setGenerationStatus("リモート生成キーで認証してください。", true);
       return;
@@ -1628,6 +1647,7 @@
     state.generation.submitting = true;
     $("#generation-submit").disabled = true;
     $("#generation-more-four").disabled = true;
+    updateGenerationAuthUi();
     renderGenerationRequestSummary();
     if (!requestOverride) saveGenerationSettings();
     setGenerationStatus("送信中…");
@@ -1660,7 +1680,195 @@
     } catch (error) {
       state.generation.submitting = false;
       $("#generation-submit").disabled = false;
+      updateGenerationAuthUi();
       setGenerationStatus(error.message || String(error), true);
+    }
+  }
+
+  function stopBulkGenerationPolling() {
+    if (state.generation.bulk.pollTimer) {
+      clearTimeout(state.generation.bulk.pollTimer);
+      state.generation.bulk.pollTimer = null;
+    }
+  }
+
+  function renderBulkResults(data, bulkId) {
+    const container = $("#generation-bulk-results");
+    if (!container) return;
+    const selected = Array.isArray(data?.output?.selected_images) ? data.output.selected_images : [];
+    const allCount = Number(data?.completed_count || 0);
+    const failed = Number(data?.failed_count || 0);
+    const selectionLabel = data?.selection_mode === "none"
+      ? "AI選別なし（全画像を保持）"
+      : data?.selection_state === "completed"
+        ? `AI選別済み / ${selected.length}枚`
+        : data?.selection_state === "failed"
+          ? `AI選別失敗（生成画像は保持）${data.selection_error ? `: ${data.selection_error}` : ""}`
+          : "AI選別未実行";
+    container.replaceChildren();
+    const summary = document.createElement("p");
+    summary.textContent = `${allCount}枚生成 / 失敗${failed} / ${selectionLabel}`;
+    container.append(summary);
+    if (selected.length) {
+      const heading = document.createElement("strong");
+      heading.textContent = "選別結果（選別された画像のみ）";
+      container.append(heading);
+      const list = document.createElement("ul");
+      for (const item of selected) {
+        const row = document.createElement("li");
+        row.textContent = item?.filename || "画像";
+        list.append(row);
+      }
+      container.append(list);
+      const selectedButton = document.createElement("button");
+      selectedButton.className = "button secondary";
+      selectedButton.type = "button";
+      selectedButton.textContent = "選別結果だけを見る";
+      selectedButton.addEventListener("click", () => {
+        state.generation.bulk.selectedFilenames = selected.map((item) => String(item?.filename || "")).filter(Boolean);
+        state.generation.bulk.selectedVariationIndexes = selected
+          .map((item) => Number(item?.variation_index))
+          .filter((value) => Number.isInteger(value) && value > 0);
+        state.generation.bulk.selectedOnly = true;
+        setView("gallery");
+        render();
+        setMessage("選別結果だけを表示しています。『全画像に戻る』で解除できます。");
+      });
+      container.append(selectedButton);
+    }
+    const link = document.createElement("a");
+    link.className = "button secondary";
+    link.href = generationResultUrl(bulkId);
+    link.textContent = "全画像を見る";
+    link.addEventListener("click", () => { state.generation.bulk.selectedOnly = false; });
+    container.append(link);
+    container.hidden = false;
+  }
+
+  async function pollBulkGeneration(bulkId, sequence) {
+    if (state.generation.bulk.bulkId !== bulkId || state.generation.bulk.sequence !== sequence) return;
+    try {
+      const response = await fetch(`/api/generation/bulk-jobs/${encodeURIComponent(bulkId)}`, { cache: "no-store" });
+      const data = await response.json();
+      if (state.generation.bulk.bulkId !== bulkId || state.generation.bulk.sequence !== sequence) return;
+      if (!response.ok || data.ok === false) throw new Error(data.error || "大量生成状態を取得できません。");
+      const total = Number(data.requested_total || data.total_count || 0);
+      const completed = Number(data.completed_count || 0);
+      const failed = Number(data.failed_count || 0);
+      const current = Number(data.current_index || completed + failed);
+      const stage = data.state === "selecting" ? " / AI選別中…" : data.stop_requested ? " / 停止要求済み" : "";
+      const stateLabel = { queued: "Queued", resolving: "Resolving", generating: "Generating", selecting: "Selecting", stopped: "Stopped", completed: "Completed", failed: "Failed" }[data.state] || data.state || "Unknown";
+      $("#generation-bulk-status").textContent = `${stateLabel} ${completed} / ${total}${failed ? ` / Failed ${failed}` : ""}（処理 ${current} / ${total}）${stage}`;
+      state.generation.bulk.lastOutput = data;
+      if (["completed", "failed", "stopped"].includes(data.state)) {
+        stopBulkGenerationPolling();
+        state.generation.bulk.submitting = false;
+        state.generation.bulk.stopping = false;
+        $("#generation-bulk-start").disabled = false;
+        $("#generation-bulk-stop").disabled = true;
+        updateGenerationAuthUi();
+        renderBulkResults(data, bulkId);
+        state.generation.bulk.selectedFilenames = selectedFilenamesFromBulk(data);
+        state.generation.bulk.selectedVariationIndexes = selectedVariationIndexesFromBulk(data);
+        state.generation.bulk.selectedOnly = false;
+        $("#job-filter").value = bulkId;
+        setMessage(data.state === "completed" ? "大量生成が完了しました。全画像をGalleryへ同期しています。" : `大量生成は${stateLabel}になりました。`);
+        await load({ page: 1 });
+        return;
+      }
+      state.generation.bulk.pollTimer = setTimeout(() => pollBulkGeneration(bulkId, sequence), 1500);
+    } catch (error) {
+      if (state.generation.bulk.bulkId !== bulkId || state.generation.bulk.sequence !== sequence) return;
+      stopBulkGenerationPolling();
+      state.generation.bulk.submitting = false;
+      state.generation.bulk.stopping = false;
+      $("#generation-bulk-start").disabled = false;
+      $("#generation-bulk-stop").disabled = true;
+      updateGenerationAuthUi();
+      $("#generation-bulk-status").textContent = error.message || String(error);
+      setMessage(error.message || String(error), true);
+    }
+  }
+
+  function selectedFilenamesFromBulk(data) {
+    return (Array.isArray(data?.output?.selected_images) ? data.output.selected_images : [])
+      .map((item) => String(item?.filename || ""))
+      .filter(Boolean);
+  }
+
+  function selectedVariationIndexesFromBulk(data) {
+    return (Array.isArray(data?.output?.selected_images) ? data.output.selected_images : [])
+      .map((item) => Number(item?.variation_index))
+      .filter((value) => Number.isInteger(value) && value > 0);
+  }
+
+  async function startBulkGeneration() {
+    if (state.generation.bulk.submitting || state.generation.submitting) return;
+    if (state.generation.auth.required && !state.generation.auth.authenticated) {
+      setGenerationStatus("リモート生成キーで認証してください。", true);
+      return;
+    }
+    const total = Number($("#generation-bulk-count")?.value || 16);
+    const selectionMode = $("#generation-bulk-selection")?.value || "none";
+    state.generation.bulk.sequence += 1;
+    const sequence = state.generation.bulk.sequence;
+    stopBulkGenerationPolling();
+    state.generation.bulk.submitting = true;
+    state.generation.bulk.stopping = false;
+    $("#generation-bulk-start").disabled = true;
+    $("#generation-bulk-stop").disabled = false;
+    updateGenerationAuthUi();
+    $("#generation-bulk-results").hidden = true;
+    saveGenerationSettings();
+    $("#generation-bulk-status").textContent = "送信中…";
+    try {
+      const referenceMode = generationReferenceMode();
+      if (referenceMode !== "none") $("#generation-bulk-status").textContent = "参考画像を登録中…";
+      const referenceImageId = await uploadGenerationReference();
+      const request = JSON.parse(JSON.stringify(generationPayload(referenceImageId)));
+      request.total_count = total;
+      request.selection_mode = selectionMode;
+      state.generation.bulk.lastRequest = JSON.parse(JSON.stringify(request));
+      const response = await fetch("/api/generation/bulk-jobs", {
+        method: "POST",
+        headers: generationMutationHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify(request),
+      });
+      const data = await response.json();
+      if (!response.ok || data.ok === false) throw new Error(data.error || "大量生成を開始できません。");
+      if (!data.bulk_id) throw new Error("大量生成のbulk_idがありません。");
+      state.generation.bulk.bulkId = data.bulk_id;
+      await pollBulkGeneration(data.bulk_id, sequence);
+    } catch (error) {
+      state.generation.bulk.submitting = false;
+      state.generation.bulk.stopping = false;
+      $("#generation-bulk-start").disabled = false;
+      $("#generation-bulk-stop").disabled = true;
+      updateGenerationAuthUi();
+      $("#generation-bulk-status").textContent = error.message || String(error);
+      setMessage(error.message || String(error), true);
+    }
+  }
+
+  async function stopBulkGeneration() {
+    const bulkId = state.generation.bulk.bulkId;
+    if (!bulkId || !state.generation.bulk.submitting || state.generation.bulk.stopping) return;
+    state.generation.bulk.stopping = true;
+    $("#generation-bulk-stop").disabled = true;
+    $("#generation-bulk-status").textContent = "停止要求を送信中…";
+    try {
+      const response = await fetch(`/api/generation/bulk-jobs/${encodeURIComponent(bulkId)}/stop`, {
+        method: "POST",
+        headers: generationMutationHeaders({ "Content-Type": "application/json" }),
+        body: "{}",
+      });
+      const data = await response.json();
+      if (!response.ok || data.ok === false) throw new Error(data.error || "大量生成を停止できません。");
+      $("#generation-bulk-status").textContent = "停止要求済み。現在の1枚が終わるまで待機します…";
+    } catch (error) {
+      state.generation.bulk.stopping = false;
+      $("#generation-bulk-stop").disabled = false;
+      setMessage(error.message || String(error), true);
     }
   }
 
@@ -1990,21 +2198,35 @@
   function render() {
     const gallery = $("#gallery");
     gallery.replaceChildren();
+    const selectedOnly = Boolean(
+      state.generation.bulk.selectedOnly
+      && (state.generation.bulk.selectedFilenames.length || state.generation.bulk.selectedVariationIndexes.length),
+    );
+    const selectedVariationIndexes = new Set(state.generation.bulk.selectedVariationIndexes);
+    const visibleImages = selectedOnly
+      ? state.images.filter((image) => {
+        if (state.generation.bulk.selectedFilenames.includes(String(image.filename || ""))) return true;
+        const variationIndex = Number(image?.metadata?.source_metadata?.sidecar?.variation_index);
+        return Number.isInteger(variationIndex) && selectedVariationIndexes.has(variationIndex);
+      })
+      : state.images;
     const firstItem = state.total ? ((state.page - 1) * state.pageSize) + 1 : 0;
-    const lastItem = state.total ? Math.min(state.total, firstItem + state.images.length - 1) : 0;
-    const rangeText = `全${state.total.toLocaleString()}件中 ${firstItem.toLocaleString()}〜${lastItem.toLocaleString()}件を表示`;
+    const lastItem = state.total ? Math.min(state.total, firstItem + visibleImages.length - 1) : 0;
+    const rangeText = selectedOnly
+      ? `選別結果 ${visibleImages.length}件を表示（全${state.total.toLocaleString()}件中）`
+      : `全${state.total.toLocaleString()}件中 ${firstItem.toLocaleString()}〜${lastItem.toLocaleString()}件を表示`;
     renderDispersionFilter();
     updateJobFilterUi();
     renderRecent();
     $("#result-count").textContent = rangeText;
-    $("#empty").hidden = state.images.length !== 0;
+    $("#empty").hidden = visibleImages.length !== 0;
     for (const element of document.querySelectorAll("[data-page-range]")) element.textContent = rangeText;
     for (const element of document.querySelectorAll("[data-page-info]")) {
       element.textContent = `ページ ${state.page} / ${state.totalPages}`;
     }
     for (const button of document.querySelectorAll('[data-page-change="-1"]')) button.disabled = state.page <= 1;
     for (const button of document.querySelectorAll('[data-page-change="1"]')) button.disabled = state.page >= state.totalPages;
-    for (const image of state.images) {
+    for (const image of visibleImages) {
       const card = document.createElement("article");
       card.className = "card" + (state.selected.has(image.id) ? " selected" : "");
       card.tabIndex = 0;
@@ -2019,7 +2241,8 @@
       card.addEventListener("dblclick", (event) => {
         if (event.target.closest("button")) return;
         if (clickTimer) clearTimeout(clickTimer);
-        openDetail(image, state.images);
+        if (selectedOnly) openDetail(image, visibleImages);
+        else openDetail(image, state.images);
       });
       card.addEventListener("keydown", (event) => {
         if (event.key === "Enter" || event.key === " ") {
@@ -2072,7 +2295,11 @@
       detail.textContent = "詳細";
       detail.title = "詳細を開く";
       detail.setAttribute("aria-label", `${image.filename}の詳細を開く`);
-      detail.addEventListener("click", (event) => { event.stopPropagation(); openDetail(image, state.images); });
+      detail.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (selectedOnly) openDetail(image, visibleImages);
+        else openDetail(image, state.images);
+      });
       overlay.append(overlayLeft, detail);
       card.append(overlay);
 
@@ -2584,6 +2811,8 @@
     }
     $("#refresh").addEventListener("click", () => load({ page: state.page }));
     $("#generation-submit").addEventListener("click", () => submitGeneration());
+    $("#generation-bulk-start").addEventListener("click", startBulkGeneration);
+    $("#generation-bulk-stop").addEventListener("click", stopBulkGeneration);
     $("#generation-auth-submit").addEventListener("click", unlockGeneration);
     $("#generation-auth-logout").addEventListener("click", logoutGeneration);
     $("#generation-count").addEventListener("change", updateGenerationVariationState);
@@ -2659,6 +2888,9 @@
     $("#clear-filters").addEventListener("click", clearFilters);
     $("#clear-job-filter").addEventListener("click", () => {
       $("#job-filter").value = "";
+      state.generation.bulk.selectedOnly = false;
+      state.generation.bulk.selectedFilenames = [];
+      state.generation.bulk.selectedVariationIndexes = [];
       setMessage("全画像を表示しています。");
       load({ page: 1 });
     });

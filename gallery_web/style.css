@@ -113,6 +113,13 @@ main { max-width: 1680px; margin: 0 auto; padding: 22px clamp(12px, 3vw, 42px) 4
 .generation-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 .generation-status { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
 .generation-status.error { color: var(--danger); }
+.generation-bulk-panel { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel-2); }
+.generation-bulk-panel > summary { min-height: 42px; padding: 10px 2px; color: var(--muted); cursor: pointer; font-size: 13px; font-weight: 600; }
+.generation-bulk-controls { display: grid; grid-template-columns: repeat(2, minmax(150px, 1fr)); gap: 10px; margin-top: 8px; }
+.generation-bulk-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.generation-bulk-actions .button { min-height: 42px; }
+.generation-bulk-results { display: grid; gap: 6px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.generation-bulk-results ul { margin: 0; padding-left: 20px; }
 .generation-request-summary, .generation-result-summary { display: grid; gap: 8px; margin-top: 12px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel-2); }
 .generation-request-summary { border-color: #53699e; }
 .generation-restore-status { margin-top: 8px; padding: 9px 12px; border: 1px solid #8d6b2f; border-radius: 8px; color: #f0cf8a; background: rgba(141, 107, 47, .16); white-space: pre-wrap; }
@@ -378,6 +385,9 @@ dd { margin: 2px 0 0; overflow-wrap: anywhere; }
   .generation-auth input { min-width: 0; max-width: 100%; }
   .generation-actions { align-items: stretch; flex-direction: column; }
   .generation-actions .button { width: 100%; }
+  .generation-bulk-controls { grid-template-columns: 1fr; }
+  .generation-bulk-actions { align-items: stretch; flex-direction: column; }
+  .generation-bulk-actions .button { width: 100%; }
   .generation-summary-list { grid-template-columns: 1fr; }
   .generation-result-head { align-items: stretch; flex-direction: column; }
   .generation-result-head .button { width: 100%; }
