@@ -47,6 +47,8 @@
         lastOutput: null,
         selectedFilenames: [],
         selectedVariationIndexes: [],
+        selectedGlobalIndexes: [],
+        selectedJobId: "",
         selectedOnly: false,
       },
       overnight: {
@@ -1739,6 +1741,8 @@
         state.generation.bulk.selectedVariationIndexes = selected
           .map((item) => Number(item?.variation_index))
           .filter((value) => Number.isInteger(value) && value > 0);
+        state.generation.bulk.selectedGlobalIndexes = [];
+        state.generation.bulk.selectedJobId = "";
         state.generation.bulk.selectedOnly = true;
         setView("gallery");
         render();
@@ -1780,6 +1784,8 @@
         renderBulkResults(data, bulkId);
         state.generation.bulk.selectedFilenames = selectedFilenamesFromBulk(data);
         state.generation.bulk.selectedVariationIndexes = selectedVariationIndexesFromBulk(data);
+        state.generation.bulk.selectedGlobalIndexes = [];
+        state.generation.bulk.selectedJobId = "";
         state.generation.bulk.selectedOnly = false;
         $("#job-filter").value = bulkId;
         setMessage(data.state === "completed" ? "大量生成が完了しました。全画像をGalleryへ同期しています。" : `大量生成は${stateLabel}になりました。`);
@@ -1913,13 +1919,24 @@
       finalButton.className = "button secondary";
       finalButton.type = "button";
       finalButton.textContent = "Final Best4だけを見る";
-      finalButton.addEventListener("click", () => {
+      finalButton.addEventListener("click", async () => {
         state.generation.bulk.selectedFilenames = finalNames;
         state.generation.bulk.selectedVariationIndexes = [];
+        state.generation.bulk.selectedGlobalIndexes = finalSelected
+          .map((item) => Number(item?.global_index))
+          .filter((value) => Number.isInteger(value) && value > 0);
+        state.generation.bulk.selectedJobId = overnightId;
         state.generation.bulk.selectedOnly = true;
+        $("#job-filter").value = overnightId;
         setView("gallery");
-        render();
-        setMessage("Final Best4だけを表示しています。『全画像に戻る』で解除できます。");
+        setMessage("Final Best4を読み込んでいます…");
+        try {
+          await loadOvernightSelectionImages(overnightId);
+          setMessage("Final Best4だけを表示しています。『全画像に戻る』で解除できます。");
+        } catch (error) {
+          setMessage(error.message || String(error), true);
+          render();
+        }
       });
       container.append(finalButton);
     }
@@ -1934,6 +1951,37 @@
     allLink.textContent = "全画像を見る";
     container.append(allLink);
     container.hidden = false;
+  }
+
+  async function loadOvernightSelectionImages(overnightId) {
+    const images = [];
+    let page = 1;
+    let totalPages = 1;
+    let total = 0;
+    do {
+      const params = new URLSearchParams({
+        job_id: String(overnightId || ""),
+        page: String(page),
+        page_size: "100",
+        sort: "recent",
+      });
+      const response = await fetch(`/api/images?${params}`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "選別結果を読み込めません。");
+      images.push(...(Array.isArray(data.images) ? data.images : []));
+      total = Number(data.total || total || images.length);
+      totalPages = Math.max(1, Number(data.total_pages || 1));
+      page += 1;
+    } while (page <= totalPages && page <= 50);
+    state.images = images;
+    state.page = 1;
+    state.pageSize = 100;
+    state.total = total;
+    // Selected-only mode is a local view over the fetched job set. Keep
+    // pagination controls from replacing the four-image detail sequence.
+    state.totalPages = 1;
+    render();
+    loadJobSummary(String(overnightId || ""));
   }
 
   function updateOvernightButtons(data = state.generation.overnight.lastOutput || {}) {
@@ -2392,14 +2440,25 @@
     gallery.replaceChildren();
     const selectedOnly = Boolean(
       state.generation.bulk.selectedOnly
-      && (state.generation.bulk.selectedFilenames.length || state.generation.bulk.selectedVariationIndexes.length),
+      && (
+        state.generation.bulk.selectedFilenames.length
+        || state.generation.bulk.selectedVariationIndexes.length
+        || state.generation.bulk.selectedGlobalIndexes.length
+      ),
     );
     const selectedVariationIndexes = new Set(state.generation.bulk.selectedVariationIndexes);
+    const selectedGlobalIndexes = new Set(state.generation.bulk.selectedGlobalIndexes);
     const visibleImages = selectedOnly
       ? state.images.filter((image) => {
-        if (state.generation.bulk.selectedFilenames.includes(String(image.filename || ""))) return true;
+        const sidecar = image?.metadata?.source_metadata?.sidecar || {};
+        const selectedJobId = String(state.generation.bulk.selectedJobId || "");
+        const imageJobId = String(image?.job_id || sidecar?.overnight_job_id || "");
+        const jobMatches = !selectedJobId || imageJobId === selectedJobId || String(sidecar?.overnight_job_id || "") === selectedJobId;
+        const globalIndex = Number(sidecar?.global_index);
+        if (jobMatches && Number.isInteger(globalIndex) && selectedGlobalIndexes.has(globalIndex)) return true;
+        if (jobMatches && state.generation.bulk.selectedFilenames.includes(String(image.filename || ""))) return true;
         const variationIndex = Number(image?.metadata?.source_metadata?.sidecar?.variation_index);
-        return Number.isInteger(variationIndex) && selectedVariationIndexes.has(variationIndex);
+        return jobMatches && Number.isInteger(variationIndex) && selectedVariationIndexes.has(variationIndex);
       })
       : state.images;
     const firstItem = state.total ? ((state.page - 1) * state.pageSize) + 1 : 0;
@@ -2416,8 +2475,8 @@
     for (const element of document.querySelectorAll("[data-page-info]")) {
       element.textContent = `ページ ${state.page} / ${state.totalPages}`;
     }
-    for (const button of document.querySelectorAll('[data-page-change="-1"]')) button.disabled = state.page <= 1;
-    for (const button of document.querySelectorAll('[data-page-change="1"]')) button.disabled = state.page >= state.totalPages;
+    for (const button of document.querySelectorAll('[data-page-change="-1"]')) button.disabled = selectedOnly || state.page <= 1;
+    for (const button of document.querySelectorAll('[data-page-change="1"]')) button.disabled = selectedOnly || state.page >= state.totalPages;
     for (const image of visibleImages) {
       const card = document.createElement("article");
       card.className = "card" + (state.selected.has(image.id) ? " selected" : "");
@@ -3087,6 +3146,8 @@
       state.generation.bulk.selectedOnly = false;
       state.generation.bulk.selectedFilenames = [];
       state.generation.bulk.selectedVariationIndexes = [];
+      state.generation.bulk.selectedGlobalIndexes = [];
+      state.generation.bulk.selectedJobId = "";
       setMessage("全画像を表示しています。");
       load({ page: 1 });
     });

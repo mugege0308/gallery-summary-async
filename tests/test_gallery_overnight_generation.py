@@ -54,6 +54,8 @@ class _OvernightBackendHandler(BaseHTTPRequestHandler):
             return self._json({"overnight_job_id": "overnight-1", "state": "running"}, 202)
         if self.path.endswith("/stop"):
             return self._json({"overnight_job_id": "overnight-1", "state": "stopping"}, 202)
+        if self.path.endswith("/reselect"):
+            return self._json({"overnight_job_id": "overnight-1", "state": "selecting"}, 202)
         return self._json({"error": "not found"}, 404)
 
     def log_message(self, _format: str, *_args: object) -> None:
@@ -120,7 +122,7 @@ class GalleryOvernightGenerationProxyTests(unittest.TestCase):
         status, value = self.request("GET", "/api/generation/overnight-jobs/overnight-1", {})
         self.assertEqual(200, status)
         self.assertEqual("paused", value["state"])
-        for action in ("pause", "resume", "stop"):
+        for action in ("pause", "resume", "stop", "reselect"):
             status, value = self.request("POST", f"/api/generation/overnight-jobs/overnight-1/{action}", {})
             self.assertEqual(202, status)
             self.assertEqual("overnight-1", value["overnight_job_id"])

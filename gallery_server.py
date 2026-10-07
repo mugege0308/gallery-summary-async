@@ -776,7 +776,7 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
             if not raw.endswith(suffix):
                 return None
             raw = raw[: -len(suffix)]
-        elif any(raw.endswith(f"/{candidate}") for candidate in ("pause", "resume", "stop")):
+        elif any(raw.endswith(f"/{candidate}") for candidate in ("pause", "resume", "stop", "reselect")):
             return None
         overnight_id = unquote(raw)
         if not _GENERATION_JOB_ID_RE.fullmatch(overnight_id):
@@ -1199,7 +1199,7 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
                     return self._send_error_json("Content-Type: application/json が必要です。", HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
                 payload = self._request_json(max_body_bytes=self.generation_max_body_bytes)
                 return self._proxy_generation_json("POST", generation_bulk_stop_path or generation_bulk_path, payload)
-            for action in ("pause", "resume", "stop"):
+            for action in ("pause", "resume", "stop", "reselect"):
                 generation_overnight_action_path = self._generation_overnight_path(path, action=action)
                 if generation_overnight_action_path is not None:
                     if not self._require_generation_access(mutation=True):
