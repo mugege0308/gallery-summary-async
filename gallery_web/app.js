@@ -50,6 +50,10 @@
         selectedGlobalIndexes: [],
         selectedJobId: "",
         selectedOnly: false,
+        overnightSelectionView: "all",
+        overnightRoundGlobalIndexes: [],
+        overnightFinalGlobalIndexes: [],
+        overnightFinalRanks: {},
       },
       overnight: {
         jobId: "",
@@ -1899,57 +1903,134 @@
     try { return window.localStorage; } catch (_error) { return null; }
   }
 
+  function overnightSelectionEntries(data) {
+    const roundEntries = [];
+    for (const round of Array.isArray(data?.rounds) ? data.rounds : []) {
+      for (const item of Array.isArray(round?.selected) ? round.selected : []) {
+        const globalIndex = Number(item?.global_index);
+        if (!Number.isInteger(globalIndex) || globalIndex <= 0) continue;
+        roundEntries.push({ ...item, round_index: Number(round.round_index || 0), global_index: globalIndex });
+      }
+    }
+    const finalEntries = (Array.isArray(data?.final_selected) ? data.final_selected : [])
+      .map((item) => ({ ...item, global_index: Number(item?.global_index) }))
+      .filter((item) => Number.isInteger(item.global_index) && item.global_index > 0);
+    const uniqueByGlobalIndex = (items) => [...new Map(items.map((item) => [item.global_index, item])).values()];
+    return {
+      roundEntries: uniqueByGlobalIndex(roundEntries),
+      finalEntries: uniqueByGlobalIndex(finalEntries),
+    };
+  }
+
+  function overnightSelectionViewEntries(data, view) {
+    const entries = overnightSelectionEntries(data);
+    if (view === "final") return entries.finalEntries;
+    if (view === "round") return entries.roundEntries;
+    return [];
+  }
+
+  function overnightSelectionBadge(image) {
+    const jobId = String(state.generation.bulk.selectedJobId || "");
+    if (!jobId) return null;
+    const sidecar = image?.metadata?.source_metadata?.sidecar || {};
+    const imageJobId = String(image?.job_id || sidecar.overnight_job_id || "");
+    if (imageJobId !== jobId) return null;
+    const globalIndex = Number(sidecar.global_index);
+    if (!Number.isInteger(globalIndex) || globalIndex <= 0) return null;
+    const finalIndexes = new Set(state.generation.bulk.overnightFinalGlobalIndexes);
+    const roundIndexes = new Set(state.generation.bulk.overnightRoundGlobalIndexes);
+    if (finalIndexes.has(globalIndex)) {
+      const rank = state.generation.bulk.overnightFinalRanks[String(globalIndex)];
+      const badge = document.createElement("span");
+      badge.className = "badge overnight-selection-badge final-selection-badge";
+      badge.textContent = Number.isInteger(rank) && rank > 0 ? `Final #${rank}` : "Final Best4";
+      badge.title = "Final Best4";
+      return badge;
+    }
+    if (roundIndexes.has(globalIndex)) {
+      const badge = document.createElement("span");
+      badge.className = "badge overnight-selection-badge round-selection-badge";
+      badge.textContent = "Round Best4";
+      badge.title = "Round Best4";
+      return badge;
+    }
+    return null;
+  }
+
+  async function showOvernightSelectionView(overnightId, data, view) {
+    const entries = overnightSelectionViewEntries(data, view);
+    const allEntries = overnightSelectionEntries(data);
+    state.generation.bulk.overnightSelectionView = view;
+    state.generation.bulk.overnightRoundGlobalIndexes = allEntries.roundEntries.map((item) => item.global_index);
+    state.generation.bulk.overnightFinalGlobalIndexes = allEntries.finalEntries.map((item) => item.global_index);
+    state.generation.bulk.overnightFinalRanks = Object.fromEntries(
+      allEntries.finalEntries
+        .filter((item) => Number.isInteger(Number(item?.rank)) && Number(item.rank) > 0)
+        .map((item) => [String(item.global_index), Number(item.rank)]),
+    );
+    state.generation.bulk.selectedFilenames = entries.map((item) => String(item?.filename || "")).filter(Boolean);
+    state.generation.bulk.selectedVariationIndexes = [];
+    state.generation.bulk.selectedGlobalIndexes = entries.map((item) => item.global_index);
+    state.generation.bulk.selectedJobId = overnightId;
+    state.generation.bulk.selectedOnly = view !== "all";
+    $("#job-filter").value = overnightId;
+    setView("gallery");
+    setMessage(view === "final" ? "Final Best4を読み込んでいます…" : view === "round" ? "Round Best4を読み込んでいます…" : "全画像を読み込んでいます…");
+    await loadOvernightSelectionImages(overnightId);
+    const label = view === "final" ? "Final Best4" : view === "round" ? "Round Best4" : "全画像";
+    setMessage(`${label}を表示しています。`);
+  }
+
   function renderOvernightResults(data, overnightId) {
     const container = $("#generation-overnight-results");
     if (!container) return;
-    const finalSelected = Array.isArray(data?.final_selected) ? data.final_selected : [];
+    const entries = overnightSelectionEntries(data);
+    const finalSelected = entries.finalEntries;
+    const roundSelected = entries.roundEntries;
     const rounds = Array.isArray(data?.rounds) ? data.rounds : [];
     container.replaceChildren();
-    const summary = document.createElement("p");
-    summary.textContent = `生成 ${Number(data?.generated_count || 0)} / ${Number(data?.total_requested || 0)}、失敗 ${Number(data?.failed_count || 0)}、Round Best ${Number(data?.round_best_count || 0)}、Final Best ${finalSelected.length}`;
+    const summary = document.createElement("div");
+    summary.className = "overnight-selection-summary";
+    const generated = document.createElement("span");
+    generated.textContent = `生成: ${Number(data?.generated_count || 0).toLocaleString()} / ${Number(data?.total_requested || 0).toLocaleString()}`;
+    const roundCount = document.createElement("span");
+    roundCount.textContent = `Round選抜: ${roundSelected.length.toLocaleString()}`;
+    const finalCount = document.createElement("span");
+    finalCount.textContent = `最終選抜: ${finalSelected.length.toLocaleString()}`;
+    summary.append(generated, roundCount, finalCount);
     container.append(summary);
-    if (finalSelected.length) {
-      const finalNames = finalSelected
-        .map((item) => String(item?.filename || ""))
-        .filter(Boolean);
-      const finalInfo = document.createElement("p");
-      finalInfo.textContent = `Final Best4: ${finalNames.join(" / ")}`;
-      container.append(finalInfo);
-      const finalButton = document.createElement("button");
-      finalButton.className = "button secondary";
-      finalButton.type = "button";
-      finalButton.textContent = "Final Best4だけを見る";
-      finalButton.addEventListener("click", async () => {
-        state.generation.bulk.selectedFilenames = finalNames;
-        state.generation.bulk.selectedVariationIndexes = [];
-        state.generation.bulk.selectedGlobalIndexes = finalSelected
-          .map((item) => Number(item?.global_index))
-          .filter((value) => Number.isInteger(value) && value > 0);
-        state.generation.bulk.selectedJobId = overnightId;
-        state.generation.bulk.selectedOnly = true;
-        $("#job-filter").value = overnightId;
-        setView("gallery");
-        setMessage("Final Best4を読み込んでいます…");
+
+    const viewControls = document.createElement("div");
+    viewControls.className = "overnight-selection-controls";
+    viewControls.setAttribute("aria-label", "夜間生成の表示切替");
+    const views = [
+      ["all", `全画像 ${Number(data?.generated_count || data?.total_requested || 0).toLocaleString()}`, "secondary"],
+      ["round", `Round Best4 ${roundSelected.length.toLocaleString()}`, "secondary"],
+      ["final", `Final Best4 ${finalSelected.length.toLocaleString()}`, "primary"],
+    ];
+    for (const [view, label, style] of views) {
+      const button = document.createElement("button");
+      button.className = `button ${style} overnight-selection-view-button`;
+      button.type = "button";
+      button.textContent = label;
+      button.dataset.selectionView = view;
+      button.disabled = view !== "all" && !overnightSelectionViewEntries(data, view).length;
+      button.addEventListener("click", async () => {
         try {
-          await loadOvernightSelectionImages(overnightId);
-          setMessage("Final Best4だけを表示しています。『全画像に戻る』で解除できます。");
+          await showOvernightSelectionView(overnightId, data, view);
         } catch (error) {
           setMessage(error.message || String(error), true);
           render();
         }
       });
-      container.append(finalButton);
+      viewControls.append(button);
     }
+    container.append(viewControls);
     if (rounds.length) {
       const roundInfo = document.createElement("span");
       roundInfo.textContent = `完了ラウンド ${rounds.filter((round) => round?.generation_finished_at).length} / ${Number(data?.total_rounds || 0)}`;
       container.append(roundInfo);
     }
-    const allLink = document.createElement("a");
-    allLink.className = "button secondary";
-    allLink.href = generationResultUrl(overnightId);
-    allLink.textContent = "全画像を見る";
-    container.append(allLink);
     container.hidden = false;
   }
 
@@ -2456,6 +2537,7 @@
         const jobMatches = !selectedJobId || imageJobId === selectedJobId || String(sidecar?.overnight_job_id || "") === selectedJobId;
         const globalIndex = Number(sidecar?.global_index);
         if (jobMatches && Number.isInteger(globalIndex) && selectedGlobalIndexes.has(globalIndex)) return true;
+        if (selectedJobId) return false;
         if (jobMatches && state.generation.bulk.selectedFilenames.includes(String(image.filename || ""))) return true;
         const variationIndex = Number(image?.metadata?.source_metadata?.sidecar?.variation_index);
         return jobMatches && Number.isInteger(variationIndex) && selectedVariationIndexes.has(variationIndex);
@@ -2527,6 +2609,8 @@
       badge.textContent = labels[status] || status;
       if (state.pending.has(image.id)) badge.textContent += "（未確定）";
       overlayLeft.append(mark, badge);
+      const overnightBadge = overnightSelectionBadge(image);
+      if (overnightBadge) overlayLeft.append(overnightBadge);
       if (currentLoraCandidate(image)) {
         const loraBadge = document.createElement("span");
         loraBadge.className = "badge lora_candidate";

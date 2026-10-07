@@ -120,6 +120,14 @@ main { max-width: 1680px; margin: 0 auto; padding: 22px clamp(12px, 3vw, 42px) 4
 .generation-bulk-actions .button { min-height: 42px; }
 .generation-bulk-results { display: grid; gap: 6px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
 .generation-bulk-results ul { margin: 0; padding-left: 20px; }
+.overnight-selection-summary { display: flex; flex-wrap: wrap; gap: 8px 14px; color: var(--muted); font-size: 13px; }
+.overnight-selection-summary span { min-width: 0; overflow-wrap: anywhere; }
+.overnight-selection-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.overnight-selection-controls .button { min-height: 42px; }
+.overnight-selection-controls .button.primary { font-weight: 700; }
+.overnight-selection-badge { font-weight: 700; }
+.round-selection-badge { border-color: #53699e; background: #20283a; color: #dce6ff; }
+.final-selection-badge { border-color: #8d6b2f; background: rgba(141, 107, 47, .24); color: #ffe2a4; }
 .generation-request-summary, .generation-result-summary { display: grid; gap: 8px; margin-top: 12px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel-2); }
 .generation-request-summary { border-color: #53699e; }
 .generation-restore-status { margin-top: 8px; padding: 9px 12px; border: 1px solid #8d6b2f; border-radius: 8px; color: #f0cf8a; background: rgba(141, 107, 47, .16); white-space: pre-wrap; }
@@ -388,6 +396,9 @@ dd { margin: 2px 0 0; overflow-wrap: anywhere; }
   .generation-bulk-controls { grid-template-columns: 1fr; }
   .generation-bulk-actions { align-items: stretch; flex-direction: column; }
   .generation-bulk-actions .button { width: 100%; }
+  .overnight-selection-summary { align-items: flex-start; flex-direction: column; gap: 6px; }
+  .overnight-selection-controls { align-items: stretch; flex-direction: column; }
+  .overnight-selection-controls .button { width: 100%; }
   .generation-summary-list { grid-template-columns: 1fr; }
   .generation-result-head { align-items: stretch; flex-direction: column; }
   .generation-result-head .button { width: 100%; }
