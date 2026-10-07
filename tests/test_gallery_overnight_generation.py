@@ -129,6 +129,16 @@ class GalleryOvernightGenerationProxyTests(unittest.TestCase):
         self.assertIn("/api/generation/overnight-jobs", _OvernightBackendHandler.requests)
         self.assertIn("/api/generation/overnight-jobs/overnight-1/pause", _OvernightBackendHandler.requests)
 
+    def test_shutdown_choice_is_forwarded_for_one_job(self) -> None:
+        status, value = self.request(
+            "POST",
+            "/api/generation/overnight-jobs",
+            {"total_count": 128, "count": 1, "shutdown_after_completion": True},
+        )
+        self.assertEqual(202, status)
+        self.assertEqual("overnight-1", value["overnight_job_id"])
+        self.assertTrue(_OvernightBackendHandler.last_payload["shutdown_after_completion"])
+
     def test_frontend_contains_overnight_controls_and_no_backend_url(self) -> None:
         root = Path(__file__).resolve().parents[1]
         html = (root / "gallery_web" / "index.html").read_text(encoding="utf-8")
@@ -141,6 +151,8 @@ class GalleryOvernightGenerationProxyTests(unittest.TestCase):
         self.assertIn('id="generation-overnight-pause"', html)
         self.assertIn('id="generation-overnight-resume"', html)
         self.assertIn('id="generation-overnight-stop"', html)
+        self.assertIn('id="generation-overnight-completion-action"', html)
+        self.assertIn('value="shutdown"', html)
         self.assertIn('/api/generation/overnight-jobs', app)
         self.assertIn('gallery.generation.overnight_job_id', app)
         self.assertIn('生成:', app)
@@ -149,6 +161,9 @@ class GalleryOvernightGenerationProxyTests(unittest.TestCase):
         self.assertIn('全画像', app)
         self.assertIn('Round Best4', app)
         self.assertIn('Final Best4', app)
+        self.assertIn('shutdown_after_completion', app)
+        self.assertIn('completionAction.value = "none"', app)
+        self.assertIn('PCシャットダウン予約済み', app)
         self.assertIn('overnightSelectionBadge', app)
         self.assertIn('overnight_job_id', app)
         self.assertIn('selectedGlobalIndexes', app)

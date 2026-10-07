@@ -2093,7 +2093,12 @@
       const round = Number(data.current_round || 1);
       const stateLabel = { queued: "Queued", running: "Generating", selecting: "AI選別中", paused: "Paused", paused_error: "Paused (error)", stopping: "Stopping", stopped: "Stopped", completed: "Completed", completed_selection_failed: "Completed (selection failed)", failed: "Failed" }[data.state] || data.state || "Unknown";
       const suffix = data.state === "selecting" ? "" : ` / Round ${round} / slot ${Math.min(current, 32)} / ${total}`;
-      $("#generation-overnight-status").textContent = `${stateLabel} ${generated} / ${total}${failed ? ` / Failed ${failed}` : ""}${suffix}`;
+      const shutdownStatus = data.shutdown?.status === "scheduled"
+        ? " / PCシャットダウン予約済み（60秒後）"
+        : data.shutdown?.status === "blocked"
+          ? " / PCシャットダウン未予約"
+          : "";
+      $("#generation-overnight-status").textContent = `${stateLabel} ${generated} / ${total}${failed ? ` / Failed ${failed}` : ""}${suffix}${shutdownStatus}`;
       updateOvernightButtons(data);
       if (["completed", "completed_selection_failed", "failed", "stopped"].includes(data.state)) {
         stopOvernightGenerationPolling();
@@ -2137,6 +2142,7 @@
       const referenceImageId = await uploadGenerationReference();
       const payload = JSON.parse(JSON.stringify(generationPayload(referenceImageId)));
       payload.total_count = Number($("#generation-overnight-count")?.value || 256);
+      payload.shutdown_after_completion = $("#generation-overnight-completion-action")?.value === "shutdown";
       const response = await fetch("/api/generation/overnight-jobs", {
         method: "POST",
         headers: generationMutationHeaders({ "Content-Type": "application/json" }),
@@ -2145,6 +2151,9 @@
       const data = await response.json();
       if (!response.ok || data.ok === false) throw new Error(data.error || "夜間生成を開始できません。");
       if (!data.overnight_job_id) throw new Error("夜間生成job_idがありません。");
+      // This choice is serialized into one job only, then reset for the next job.
+      const completionAction = $("#generation-overnight-completion-action");
+      if (completionAction) completionAction.value = "none";
       state.generation.overnight.jobId = data.overnight_job_id;
       try { overnightStorage()?.setItem("gallery.generation.overnight_job_id", data.overnight_job_id); } catch (_error) { /* best effort */ }
       await pollOvernightGeneration(data.overnight_job_id, sequence);

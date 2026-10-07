@@ -292,6 +292,13 @@
             </select>
           </label>
           <span class="generation-field-help">各ラウンド: 32枚 / 各ラウンド選別: Best4 / 最終選別: Best4</span>
+          <label>完了後の動作
+            <select id="generation-overnight-completion-action">
+              <option value="none" selected>何もしない</option>
+              <option value="shutdown">このjobが正常完了したらPCをシャットダウン（60秒後）</option>
+            </select>
+          </label>
+          <span class="generation-field-help">明示したこのjobだけが対象です。失敗・停止・選別失敗では実行しません。</span>
         </div>
         <div class="generation-bulk-actions">
           <button id="generation-overnight-start" class="button secondary" type="button">夜間生成を開始</button>
