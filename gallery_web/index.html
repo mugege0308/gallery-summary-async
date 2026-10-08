@@ -337,15 +337,31 @@
       <span class="candidate-hold">保留候補 <b id="job-summary-hold">0</b></span>
       <span class="candidate-reject">没候補 <b id="job-summary-reject">0</b></span>
       <div id="job-selection-summary" class="job-selection-summary" hidden>
+        <div class="job-selection-heading">
+          <div>
+            <span class="job-selection-kicker">Overnight</span>
+            <h3>選別結果</h3>
+          </div>
+          <span id="job-selection-complete-badge" class="job-selection-complete-badge" hidden>選別完了</span>
+        </div>
         <div class="job-selection-counts" aria-label="Overnight選別結果">
           <span>生成 <b id="job-selection-generated">0 / 0</b></span>
           <span>Round Best4 <b id="job-selection-round">0</b></span>
           <span>Final Best4 <b id="job-selection-final">選別待ち</b></span>
         </div>
         <div id="job-selection-status" class="job-selection-status pending"></div>
+        <section id="job-selection-final-hero" class="job-selection-final-hero" hidden aria-labelledby="job-selection-final-title">
+          <div class="job-selection-final-head">
+            <div>
+              <h4 id="job-selection-final-title">Final Best4</h4>
+              <span>このjobの最終選別結果</span>
+            </div>
+          </div>
+          <div id="job-selection-preview" class="job-selection-preview"></div>
+        </section>
+        <button id="job-selection-final-button" class="button primary job-selection-final-primary" type="button" hidden>最終Best4を開く</button>
+        <div class="job-selection-secondary-label">その他の表示</div>
         <div id="job-selection-controls" class="job-selection-controls" aria-label="Overnight選別結果の表示切替"></div>
-        <div id="job-selection-preview" class="job-selection-preview" hidden></div>
-        <button id="job-selection-final-button" class="button primary" type="button" hidden>最終Best4を見る</button>
       </div>
     </section>
 

@@ -1962,7 +1962,7 @@
       const rank = state.generation.bulk.overnightFinalRanks[String(globalIndex)];
       const badge = document.createElement("span");
       badge.className = "badge overnight-selection-badge final-selection-badge";
-      badge.textContent = Number.isInteger(rank) && rank > 0 ? `Final #${rank}` : "Final Best4";
+      badge.textContent = Number.isInteger(rank) && rank > 0 ? `FINAL #${rank}` : "FINAL BEST4";
       badge.title = "Final Best4";
       badge.setAttribute("aria-label", badge.textContent);
       badge.dataset.globalIndex = String(globalIndex);
@@ -1978,6 +1978,12 @@
       return badge;
     }
     return null;
+  }
+
+  function overnightSelectionFailure(data) {
+    return data?.state === "completed_selection_failed"
+      || data?.selection_state === "failed"
+      || data?.final_selection_state === "failed";
   }
 
   async function showOvernightSelectionView(overnightId, data, view) {
@@ -2004,8 +2010,13 @@
     const finalSelected = entries.finalEntries;
     const roundSelected = entries.roundEntries;
     const rounds = Array.isArray(data?.rounds) ? data.rounds : [];
+    const selectionFailed = overnightSelectionFailure(data);
     const currentView = state.generation.bulk.overnightSelectionView || "all";
     container.replaceChildren();
+    const heading = document.createElement("h4");
+    heading.className = "overnight-selection-heading";
+    heading.textContent = "選別結果";
+    container.append(heading);
     const summary = document.createElement("div");
     summary.className = "overnight-selection-summary";
     const generated = document.createElement("span");
@@ -2015,14 +2026,21 @@
     const finalCount = document.createElement("span");
     finalCount.textContent = finalSelected.length
       ? `最終選抜: ${finalSelected.length.toLocaleString()}`
-      : "最終選抜: 選別待ち";
+      : selectionFailed ? "最終選抜: 失敗" : "最終選抜: 選別待ち";
     summary.append(generated, roundCount, finalCount);
     container.append(summary);
+
+    const selectionStatus = document.createElement("div");
+    selectionStatus.className = `job-selection-status ${finalSelected.length ? "ready" : selectionFailed ? "error" : "pending"}`;
+    selectionStatus.textContent = finalSelected.length
+      ? "選別完了"
+      : selectionFailed ? "最終選別に失敗しました。生成画像とRound Best4は閲覧できます。" : "Final Best4: 選別待ち";
+    container.append(selectionStatus);
 
     const finalAction = document.createElement("button");
     finalAction.className = "button primary overnight-final-primary-action";
     finalAction.type = "button";
-    finalAction.textContent = finalSelected.length ? `最終Best4を見る（${finalSelected.length}）` : "最終Best4: 選別待ち";
+    finalAction.textContent = finalSelected.length ? `最終Best4を開く（${finalSelected.length}）` : selectionFailed ? "最終Best4: 選別に失敗" : "最終Best4: 選別待ち";
     finalAction.disabled = !finalSelected.length;
     finalAction.addEventListener("click", async () => {
       if (!finalSelected.length) return;
@@ -2039,9 +2057,9 @@
     viewControls.className = "overnight-selection-controls";
     viewControls.setAttribute("aria-label", "夜間生成の表示切替");
     const views = [
-      ["all", `全画像 ${Number(data?.generated_count || data?.total_requested || 0).toLocaleString()}`, "secondary"],
-      ["round", `Round Best4 ${roundSelected.length.toLocaleString()}`, "secondary"],
       ["final", finalSelected.length ? `★ Final Best4 ${finalSelected.length.toLocaleString()}` : "★ Final Best4 選別待ち", "primary"],
+      ["round", `Round Best4 ${roundSelected.length.toLocaleString()}`, "secondary"],
+      ["all", `全画像 ${Number(data?.generated_count || data?.total_requested || 0).toLocaleString()}`, "secondary"],
     ];
     for (const [view, label, style] of views) {
       const button = document.createElement("button");
@@ -2130,20 +2148,20 @@
         const image = imageByGlobalIndex.get(globalIndex);
         const rank = Number(entry.rank);
         const button = document.createElement("button");
-        button.className = "job-selection-preview-item";
+        button.className = `job-selection-preview-item${rank === 1 ? " final-rank-1" : ""}`;
         button.type = "button";
         button.disabled = !image;
-        button.setAttribute("aria-label", Number.isInteger(rank) && rank > 0 ? `Final #${rank}を開く` : "Final Best4を開く");
+        button.setAttribute("aria-label", Number.isInteger(rank) && rank > 0 ? `FINAL #${rank}を開く` : "Final Best4を開く");
         if (image) {
           const imageElement = document.createElement("img");
           imageElement.src = image.thumbnail_url || image.url;
-          imageElement.alt = Number.isInteger(rank) && rank > 0 ? `Final #${rank}` : "Final Best4";
+          imageElement.alt = Number.isInteger(rank) && rank > 0 ? `FINAL #${rank}` : "Final Best4";
           imageElement.loading = "lazy";
           button.append(imageElement);
           button.addEventListener("click", () => openDetail(image, finalImages));
         }
         const label = document.createElement("span");
-        label.textContent = Number.isInteger(rank) && rank > 0 ? `#${rank}` : "Final";
+        label.textContent = Number.isInteger(rank) && rank > 0 ? `FINAL #${rank}` : "FINAL BEST4";
         button.append(label);
         grid.append(button);
       }
@@ -2441,15 +2459,20 @@
     const section = $("#job-selection-summary");
     if (!section) return;
     section.hidden = true;
+    const hero = $("#job-selection-final-hero");
+    if (hero) hero.hidden = true;
+    const completeBadge = $("#job-selection-complete-badge");
+    if (completeBadge) completeBadge.hidden = true;
     const preview = $("#job-selection-preview");
     if (preview) {
       preview.replaceChildren();
-      preview.hidden = true;
+      preview.hidden = false;
     }
     const finalButton = $("#job-selection-final-button");
     if (finalButton) {
       finalButton.hidden = true;
       finalButton.disabled = true;
+      finalButton.onclick = null;
     }
     const controls = $("#job-selection-controls");
     if (controls) controls.replaceChildren();
@@ -2461,23 +2484,27 @@
     const finalCount = $("#job-selection-final");
     const generatedCount = $("#job-selection-generated");
     const status = $("#job-selection-status");
+    const selectionFailed = overnightSelectionFailure(data);
     if (generatedCount) generatedCount.textContent = `${generated} / ${total}`;
     if (roundCount) roundCount.textContent = entries.roundEntries.length.toLocaleString();
     if (finalCount) finalCount.textContent = entries.finalEntries.length
       ? entries.finalEntries.length.toLocaleString()
-      : "選別待ち";
+      : selectionFailed ? "失敗" : "選別待ち";
     if (status) {
       status.textContent = entries.finalEntries.length
-        ? "Final Best4が選別済みです。"
-        : "Final Best4: 選別待ち";
-      status.className = entries.finalEntries.length ? "job-selection-status ready" : "job-selection-status pending";
+        ? "選別完了"
+        : selectionFailed ? "最終選別に失敗しました。生成画像とRound Best4は閲覧できます。" : "Final Best4: 選別待ち";
+      status.className = `job-selection-status ${entries.finalEntries.length ? "ready" : selectionFailed ? "error" : "pending"}`;
+    }
+    if (completeBadge) {
+      completeBadge.hidden = !entries.finalEntries.length || selectionFailed;
     }
     if (controls) {
       const currentView = state.generation.bulk.overnightSelectionView || "all";
       const views = [
-        ["all", `全画像 ${Number(data.generated_count || data.total_requested || 0).toLocaleString()}`, "secondary"],
-        ["round", `Round Best4 ${entries.roundEntries.length.toLocaleString()}`, "secondary"],
         ["final", entries.finalEntries.length ? `★ Final Best4 ${entries.finalEntries.length.toLocaleString()}` : "★ Final Best4 選別待ち", "primary"],
+        ["round", `Round Best4 ${entries.roundEntries.length.toLocaleString()}`, "secondary"],
+        ["all", `全画像 ${Number(data.generated_count || data.total_requested || 0).toLocaleString()}`, "secondary"],
       ];
       for (const [view, label, style] of views) {
         const button = document.createElement("button");
@@ -2498,11 +2525,14 @@
       }
       controls.hidden = false;
     }
-    if (finalButton && entries.finalEntries.length) {
+    if (finalButton) {
       finalButton.hidden = false;
-      finalButton.disabled = false;
-      finalButton.textContent = `最終Best4を見る（${entries.finalEntries.length}）`;
+      finalButton.disabled = !entries.finalEntries.length;
+      finalButton.textContent = entries.finalEntries.length
+        ? `最終Best4を開く（${entries.finalEntries.length}）`
+        : selectionFailed ? "最終Best4: 選別に失敗" : "最終Best4: 選別待ち";
       finalButton.onclick = async () => {
+        if (!entries.finalEntries.length) return;
         try {
           await showOvernightSelectionView(String(overnightId), data, "final");
         } catch (error) {
@@ -2511,8 +2541,9 @@
       };
     }
     section.hidden = false;
+    if (hero) hero.hidden = false;
     if (preview) {
-      preview.hidden = !entries.finalEntries.length;
+      preview.hidden = false;
       renderOvernightFinalPreview(preview, data, String(overnightId));
     }
   }
