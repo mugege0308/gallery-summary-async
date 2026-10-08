@@ -336,6 +336,17 @@
       <span class="candidate-adopt">採用候補 <b id="job-summary-adopt">0</b></span>
       <span class="candidate-hold">保留候補 <b id="job-summary-hold">0</b></span>
       <span class="candidate-reject">没候補 <b id="job-summary-reject">0</b></span>
+      <div id="job-selection-summary" class="job-selection-summary" hidden>
+        <div class="job-selection-counts" aria-label="Overnight選別結果">
+          <span>生成 <b id="job-selection-generated">0 / 0</b></span>
+          <span>Round Best4 <b id="job-selection-round">0</b></span>
+          <span>Final Best4 <b id="job-selection-final">選別待ち</b></span>
+        </div>
+        <div id="job-selection-status" class="job-selection-status pending"></div>
+        <div id="job-selection-controls" class="job-selection-controls" aria-label="Overnight選別結果の表示切替"></div>
+        <div id="job-selection-preview" class="job-selection-preview" hidden></div>
+        <button id="job-selection-final-button" class="button primary" type="button" hidden>最終Best4を見る</button>
+      </div>
     </section>
 
     <section id="dispersion-panel" class="dispersion-panel panel" data-view-section="gallery" aria-labelledby="dispersion-title">
@@ -427,7 +438,10 @@
 
   <dialog id="detail-dialog" class="detail-dialog">
     <div class="detail-head">
-      <h2 id="detail-title">画像詳細</h2>
+      <div class="detail-heading">
+        <h2 id="detail-title">画像詳細</h2>
+        <div id="detail-selection-badge" class="detail-selection-badge" hidden></div>
+      </div>
       <button id="close-detail" class="close-button" type="button" aria-label="閉じる">×</button>
     </div>
     <div class="detail-body">
