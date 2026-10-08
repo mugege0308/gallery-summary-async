@@ -102,6 +102,7 @@
     "#generation-model",
     "#generation-rating",
     "#generation-size",
+    "#generation-multi-person-framing",
     "#generation-seed",
     "#generation-character-lora",
     "#generation-character-strength",
@@ -138,6 +139,7 @@
       model_key: $("#generation-model")?.value || "",
       rating: $("#generation-rating")?.value || "",
       size: $("#generation-size")?.value || "",
+      multi_person_framing: $("#generation-multi-person-framing")?.value || "auto",
       loras,
       count: $("#generation-count")?.value || "1",
       variation: $("#generation-variation")?.value || "off",
@@ -251,6 +253,7 @@
       ["Model", generationOptionLabel("#generation-model")],
       ["Rating", generationOptionLabel("#generation-rating")],
       ["Count / Variation", `${count} / ${variation}`],
+      ["Multi-person framing", generationOptionLabel("#generation-multi-person-framing")],
       ["LoRA", loras.join(", ")],
       ["Reference", reference],
     ];
@@ -910,6 +913,14 @@
     fillGenerationSelect("#generation-model", data.models);
     fillGenerationSelect("#generation-rating", data.ratings);
     fillGenerationSelect("#generation-size", data.sizes);
+    fillGenerationSelect("#generation-multi-person-framing", data.multi_person_framing || [
+      { key: "auto", label: "Auto" },
+      { key: "both_faces", label: "Both faces" },
+      { key: "upper_body", label: "Upper body" },
+      { key: "cowboy", label: "Cowboy shot" },
+      { key: "full_body", label: "Full body" },
+      { key: "partial_partner_ok", label: "Partial partner OK" },
+    ]);
     for (const type of ["character", "style", "additional"]) {
       fillGenerationSelect(`#generation-${type}-lora`, generationLoraEntries(type), "なし");
       updateGenerationLoraDefault(type);
@@ -1332,6 +1343,7 @@
     if (saved.model_key) restoreGenerationSelect("#generation-model", saved.model_key, "Model", warnings);
     if (saved.rating) restoreGenerationSelect("#generation-rating", saved.rating, "Rating", warnings);
     if (saved.size) restoreGenerationSelect("#generation-size", saved.size, "Size", warnings);
+    restoreGenerationSelect("#generation-multi-person-framing", saved.multi_person_framing || "auto", "Multi-person framing", warnings);
     restoreGenerationLoras(saved.loras, warnings);
 
     $("#generation-count").value = saved.count;
@@ -1363,6 +1375,7 @@
     $("#generation-explicit-tags").value = "";
     $("#generation-appearance").value = "";
     $("#generation-request").value = "";
+    $("#generation-multi-person-framing").value = "auto";
     $("#generation-seed").value = $("#generation-seed").defaultValue || "-1";
     $("#generation-count").value = $("#generation-count").querySelector("option")?.value || "1";
     $("#generation-variation").value = $("#generation-variation").defaultValue || "off";
@@ -1414,6 +1427,7 @@
 
       const size = settings.size && typeof settings.size === "object" ? settings.size : {};
       restoreGenerationSelect("#generation-size", size.preset || settings.size, "Size", warnings);
+      restoreGenerationSelect("#generation-multi-person-framing", settings.multi_person_framing || "auto", "Multi-person framing", warnings);
       restoreGenerationLoras(settings.loras, warnings);
 
       const count = Number(settings.count);
@@ -1562,6 +1576,7 @@
       rating: $("#generation-rating").value,
       loras: generationLoras(),
       size: $("#generation-size").value,
+      multi_person_framing: $("#generation-multi-person-framing").value || "auto",
       count: Number($("#generation-count").value || 1),
       variation: $("#generation-variation").value || "off",
       variation_offset: 0,

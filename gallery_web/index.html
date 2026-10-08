@@ -212,6 +212,17 @@
         <label>Size
           <select id="generation-size"></select>
         </label>
+        <label>Multi-person framing
+          <select id="generation-multi-person-framing">
+            <option value="auto" selected>Auto</option>
+            <option value="both_faces">Both faces</option>
+            <option value="upper_body">Upper body</option>
+            <option value="cowboy">Cowboy shot</option>
+            <option value="full_body">Full body</option>
+            <option value="partial_partner_ok">Partial partner OK</option>
+          </select>
+          <small class="generation-field-help">複数人のときだけ適用。1人の入力では無視されます。</small>
+        </label>
         <label>Seed（空欄は自動）
           <input id="generation-seed" type="number" step="1" value="-1">
         </label>

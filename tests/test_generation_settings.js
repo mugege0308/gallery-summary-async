@@ -19,6 +19,7 @@ function testRoundTripStoresOnlyFormSettings() {
     model_key: "animagine",
     rating: "safe",
     size: "square",
+    multi_person_framing: "full_body",
     loras: {
       character: { key: "", strength: "0.5" },
       style: { key: "matuTake_style_v1", strength: "0.5" },
@@ -36,6 +37,7 @@ function testRoundTripStoresOnlyFormSettings() {
   assert.ok(!raw.includes("opaque-reference-must-not-persist"));
   assert.ok(!raw.includes("raw-token-must-not-persist"));
   assert.deepStrictEqual(settings.read(storage), settings.capture(values));
+  assert.strictEqual(settings.read(storage).multi_person_framing, "full_body");
 }
 
 function testNormalizationAndSeedPreservation() {
@@ -59,6 +61,7 @@ function testInvalidSavedValuesFallBackSafely() {
   assert.strictEqual(normalized.count, "1");
   assert.strictEqual(normalized.variation, "off");
   assert.strictEqual(normalized.seed, "-1");
+  assert.strictEqual(settings.normalize({ multi_person_framing: "unknown" }).multi_person_framing, "auto");
 }
 
 function testUnavailableStorageIsNonFatal() {

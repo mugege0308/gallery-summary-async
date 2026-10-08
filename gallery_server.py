@@ -50,6 +50,9 @@ GENERATION_PERSISTENT_COOKIE = "gallery_generation_device"
 GENERATION_CSRF_HEADER = "X-Gallery-Generation-CSRF"
 GENERATION_SESSION_MAX_AGE_SECONDS = 12 * 60 * 60
 GENERATION_PERSISTENT_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
+MULTI_PERSON_FRAMING_VALUES = frozenset(
+    {"auto", "both_faces", "upper_body", "cowboy", "full_body", "partial_partner_ok"}
+)
 TAILSCALE_IPV4_NETWORK = ipaddress.ip_network("100.64.0.0/10")
 TAILSCALE_IPV6_NETWORK = ipaddress.ip_network("fd7a:115c:a1e0::/48")
 _ABSOLUTE_PATH_RE = re.compile(r"(?:(?:[A-Za-z]:)?[\\/])(?:[^\s,;]+[\\/])+[^\s,;]+")
@@ -246,6 +249,10 @@ def _safe_generation_settings(image: dict[str, Any], *, count_fallback: int = 1)
         count = 1
     variation = value("variation", fallback="off")
     variation = variation if variation in {"off", "auto"} else "off"
+    multi_person_framing = value("multi_person_framing", fallback="auto")
+    if multi_person_framing not in MULTI_PERSON_FRAMING_VALUES:
+        multi_person_framing = "auto"
+        warnings.append("元の複数人構図設定を復元できないため、Autoを使用します。")
 
     reference_mode = value("reference_mode", fallback="none")
     reference_mode = reference_mode if reference_mode in {"none", "composition", "pose"} else "none"
@@ -275,6 +282,7 @@ def _safe_generation_settings(image: dict[str, Any], *, count_fallback: int = 1)
             "rating",
             "loras",
             "size",
+            "multi_person_framing",
             "requested_seed",
             "reference_mode",
         )
@@ -299,6 +307,7 @@ def _safe_generation_settings(image: dict[str, Any], *, count_fallback: int = 1)
             "loras": loras,
             "count": count,
             "variation": variation,
+            "multi_person_framing": multi_person_framing,
             "seed": requested_seed,
             "actual_seed": actual_seed,
             "reference": reference,

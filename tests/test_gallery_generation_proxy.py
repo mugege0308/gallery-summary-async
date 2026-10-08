@@ -177,7 +177,7 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn("category", value["error"])
 
     def test_localhost_post_forwards_safe_json_and_returns_job(self) -> None:
-        payload = {"model_key": "animagine", "count": 1, "loras": []}
+        payload = {"model_key": "animagine", "count": 1, "loras": [], "multi_person_framing": "both_faces"}
         status, value = self.request("POST", "/api/generation/jobs", payload)
         self.assertEqual(status, 202)
         self.assertEqual(value["job_id"], "job-1")
@@ -295,6 +295,7 @@ class GalleryGenerationProxyTests(unittest.TestCase):
                                 "request_text": "白背景",
                                 "model": "animagine",
                                 "rating": "safe",
+                                "multi_person_framing": "full_body",
                                 "size": {"preset": "square", "width": 1024, "height": 1024},
                                 "count": 4,
                                 "variation": "auto",
@@ -340,6 +341,7 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertEqual(123456, settings["actual_seed"])
         self.assertEqual(4, settings["count"])
         self.assertEqual("auto", settings["variation"])
+        self.assertEqual("full_body", settings["multi_person_framing"])
         self.assertEqual("opaque-reference-123", settings["reference"]["image_id"])
         self.assertEqual([{"key": "komagome_style_v1", "lora_type": "style", "strength": 0.5}], settings["loras"])
         self.assertEqual("portrait", settings["prompt_provenance"]["tag_provenance"][0]["tag"])
@@ -731,6 +733,7 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn('id="generation-count"', html)
         self.assertIn('<option value="8">8</option>', html)
         self.assertIn('id="generation-variation"', html)
+        self.assertIn('id="generation-multi-person-framing"', html)
         self.assertIn('id="generation-reference-mode"', html)
         self.assertIn('id="generation-reference-file"', html)
         self.assertIn('id="generation-reference-help"', html)
@@ -826,6 +829,7 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn('request_text: $("#generation-request").value.trim() || null', app)
         self.assertIn('count: Number($("#generation-count").value || 1)', app)
         self.assertIn('variation: $("#generation-variation").value || "off"', app)
+        self.assertIn('multi_person_framing: $("#generation-multi-person-framing").value || "auto"', app)
         self.assertIn('variation_offset: 0', app)
         self.assertIn('submitSameSettingsFourMore', app)
         self.assertIn('GenerationContinuation.buildAdditionalGenerationRequest', app)

@@ -5,6 +5,7 @@
   const STORAGE_KEY = "gallery.generate.settings.v1";
   const VERSION = 1;
   const LORA_TYPES = ["character", "style", "additional"];
+  const MULTI_PERSON_FRAMING_VALUES = ["auto", "both_faces", "upper_body", "cowboy", "full_body", "partial_partner_ok"];
 
   function defaults() {
     return {
@@ -17,6 +18,7 @@
       model_key: "",
       rating: "",
       size: "",
+      multi_person_framing: "auto",
       loras: {
         character: { key: "", strength: "0.5" },
         style: { key: "", strength: "0.5" },
@@ -44,12 +46,14 @@
       "model_key",
       "rating",
       "size",
+      "multi_person_framing",
       "count",
       "variation",
       "seed",
     ]) {
       if (source[key] != null) result[key] = text(source[key]);
     }
+    if (!MULTI_PERSON_FRAMING_VALUES.includes(result.multi_person_framing)) result.multi_person_framing = "auto";
     for (const type of LORA_TYPES) {
       const item = source.loras && typeof source.loras === "object" ? source.loras[type] : null;
       if (item && typeof item === "object") {
@@ -80,6 +84,7 @@
       model_key: normalized.model_key,
       rating: normalized.rating,
       size: normalized.size,
+      multi_person_framing: normalized.multi_person_framing,
       loras: normalized.loras,
       count: normalized.count,
       variation: normalized.variation,
@@ -117,5 +122,5 @@
     }
   }
 
-  return { STORAGE_KEY, VERSION, LORA_TYPES, defaults, normalize, capture, read, write, clear };
+  return { STORAGE_KEY, VERSION, LORA_TYPES, MULTI_PERSON_FRAMING_VALUES, defaults, normalize, capture, read, write, clear };
 });

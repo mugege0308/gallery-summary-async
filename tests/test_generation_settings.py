@@ -55,6 +55,7 @@ class GenerationSettingsIntegrationTests(unittest.TestCase):
             "generation-model",
             "generation-rating",
             "generation-size",
+            "generation-multi-person-framing",
             "generation-seed",
             "generation-character-lora",
             "generation-character-strength",
