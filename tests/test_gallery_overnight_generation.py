@@ -119,6 +119,7 @@ class GalleryOvernightGenerationProxyTests(unittest.TestCase):
         status, value = self.request("POST", "/api/generation/overnight-jobs", {"total_count": 128, "count": 1})
         self.assertEqual(202, status)
         self.assertEqual("overnight-1", value["overnight_job_id"])
+        self.assertFalse(_OvernightBackendHandler.last_payload.get("shutdown_after_completion", False))
         status, value = self.request("GET", "/api/generation/overnight-jobs/overnight-1", {})
         self.assertEqual(200, status)
         self.assertEqual("paused", value["state"])
