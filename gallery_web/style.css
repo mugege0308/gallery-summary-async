@@ -83,6 +83,8 @@ main { max-width: 1680px; margin: 0 auto; padding: 22px clamp(12px, 3vw, 42px) 4
 .generation-grid > * { min-width: 0; }
 .generation-explicit-tags-field { display: grid; align-content: start; gap: 0; min-width: 0; }
 .generation-field-help { color: var(--muted); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
+.generation-capability-disabled { opacity: 0.62; }
+.generation-capability-help { color: #f3c975; }
 .generation-tag-search { display: grid; gap: 8px; min-width: 0; align-content: end; }
 .generation-tag-search > .button { min-height: 42px; }
 .generation-tag-search-panel { display: grid; gap: 8px; min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }

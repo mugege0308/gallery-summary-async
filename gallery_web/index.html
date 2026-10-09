@@ -206,6 +206,7 @@
         <label>Model
           <select id="generation-model"></select>
         </label>
+        <p id="generation-qwen-help" class="generation-field-help generation-capability-help" role="status" hidden></p>
         <label>Rating
           <select id="generation-rating"></select>
         </label>
@@ -268,6 +269,7 @@
       <details id="generation-bulk-panel" class="generation-bulk-panel">
         <summary>大量生成（16 / 24 / 32枚）</summary>
         <p class="generation-field-help">現在の設定を固定して1枚ずつ生成します。フォームを変更しても実行中の設定は変わりません。</p>
+        <p id="generation-bulk-help" class="generation-field-help generation-capability-help" role="status" hidden></p>
         <div class="generation-bulk-controls">
           <label>合計枚数
             <select id="generation-bulk-count">
@@ -294,6 +296,7 @@
       <details id="generation-overnight-panel" class="generation-bulk-panel generation-overnight-panel">
         <summary>夜間生成</summary>
         <p class="generation-field-help">32枚ずつ順番に生成し、各ラウンドをBest4に選別します。開始時の設定を固定します。</p>
+        <p id="generation-overnight-help" class="generation-field-help generation-capability-help" role="status" hidden></p>
         <div class="generation-bulk-controls">
           <label>総生成枚数
             <select id="generation-overnight-count">
@@ -560,6 +563,7 @@
   <script src="/static/generation_poll_guard.js" defer></script>
   <script src="/static/generation_settings.js" defer></script>
   <script src="/static/generation_tags.js" defer></script>
+  <script src="/static/generation_capabilities.js" defer></script>
   <script src="/static/generation_continuation.js" defer></script>
   <script src="/static/detail_viewer.js" defer></script>
   <script src="/static/app.js" defer></script>

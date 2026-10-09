@@ -71,6 +71,12 @@
          lastSuccessfulPollAt: 0,
       },
       reference: { imageId: "", fileName: "", previewUrl: "", source: "" },
+      capabilityRestore: {
+        count: null,
+        size: null,
+        variation: null,
+        referenceMode: null,
+      },
       tagSearch: { selected: [], results: [], query: "", category: "all", warning: "" },
       restoreWarnings: [],
       settingsRestored: false,
@@ -201,6 +207,7 @@
   }
 
   function generationSummaryLoras(loras = null) {
+    if (!generationCapabilities().lora) return [];
     const values = loras || ["character", "style", "additional"].flatMap((type) => {
       const select = $(`#generation-${type}-lora`);
       const input = $(`#generation-${type}-strength`);
@@ -830,6 +837,7 @@
     const rememberInput = $("#generation-auth-remember");
     const generationSubmit = $("#generation-submit");
     const bulkStart = $("#generation-bulk-start");
+    const overnightStart = $("#generation-overnight-start");
     if (!capability || !authStatus || !authSubmit || !authLogout || !tokenInput || !rememberInput || !generationSubmit) return;
     const tokenLabel = tokenInput.closest("label");
     const rememberLabel = rememberInput.closest("label");
@@ -843,7 +851,8 @@
       if (tokenLabel) tokenLabel.hidden = true;
       if (rememberLabel) rememberLabel.hidden = true;
       generationSubmit.disabled = Boolean(state.generation.submitting) || generationHasReferenceLoraConflict();
-      if (bulkStart) bulkStart.disabled = Boolean(state.generation.bulk.submitting) || Boolean(state.generation.submitting) || generationHasReferenceLoraConflict();
+      if (bulkStart) bulkStart.disabled = !generationCapabilities().bulk || Boolean(state.generation.bulk.submitting) || Boolean(state.generation.submitting) || generationHasReferenceLoraConflict();
+      if (overnightStart) overnightStart.disabled = !generationCapabilities().overnight || Boolean(state.generation.overnight.submitting) || Boolean(state.generation.submitting);
       return;
     }
     if (auth.authenticated) {
@@ -858,7 +867,8 @@
       if (tokenLabel) tokenLabel.hidden = true;
       if (rememberLabel) rememberLabel.hidden = true;
       generationSubmit.disabled = Boolean(state.generation.submitting) || generationHasReferenceLoraConflict();
-      if (bulkStart) bulkStart.disabled = Boolean(state.generation.bulk.submitting) || Boolean(state.generation.submitting) || generationHasReferenceLoraConflict();
+      if (bulkStart) bulkStart.disabled = !generationCapabilities().bulk || Boolean(state.generation.bulk.submitting) || Boolean(state.generation.submitting) || generationHasReferenceLoraConflict();
+      if (overnightStart) overnightStart.disabled = !generationCapabilities().overnight || Boolean(state.generation.overnight.submitting) || Boolean(state.generation.submitting);
     } else {
       capability.textContent = "リモート生成は認証が必要です";
       capability.classList.remove("ready");
@@ -870,6 +880,7 @@
       if (rememberLabel) rememberLabel.hidden = false;
       generationSubmit.disabled = true;
       if (bulkStart) bulkStart.disabled = true;
+      if (overnightStart) overnightStart.disabled = true;
     }
   }
 
@@ -894,6 +905,117 @@
       if (item && typeof item === "object") addSelectOption(select, item.key, item.display_name || item.label || item.key);
       else if (item != null) addSelectOption(select, item, item);
     }
+  }
+
+  function generationProfile() {
+    if (typeof GenerationCapabilities === "undefined") return null;
+    return GenerationCapabilities.profileFor(state.generation.options, $("#generation-model")?.value);
+  }
+
+  function generationCapabilities() {
+    if (typeof GenerationCapabilities === "undefined") {
+      return { lora: true, reference: true, pose: true, variation: true, bulk: true, overnight: true };
+    }
+    return GenerationCapabilities.capabilities(generationProfile());
+  }
+
+  function generationSupportedSizeKeys(profile = generationProfile()) {
+    if (typeof GenerationCapabilities === "undefined") return [];
+    return GenerationCapabilities.supportedSizeKeys(state.generation.options, profile);
+  }
+
+  function setGenerationCapabilityControl(selector, enabled, reason = "") {
+    const control = $(selector);
+    if (!control) return;
+    control.disabled = !enabled;
+    control.setAttribute("aria-disabled", enabled ? "false" : "true");
+    if (!enabled && reason) control.title = reason;
+    else control.removeAttribute("title");
+    const label = control.closest("label");
+    if (label) label.classList.toggle("generation-capability-disabled", !enabled);
+  }
+
+  function setGenerationCapabilityNotice(selector, enabled, message) {
+    const element = $(selector);
+    if (!element) return;
+    element.hidden = enabled || !message;
+    element.textContent = enabled ? "" : message;
+  }
+
+  function updateGenerationCapabilityUi() {
+    const caps = generationCapabilities();
+    const restore = state.generation.capabilityRestore;
+    const supportedSizes = generationSupportedSizeKeys();
+    const count = $("#generation-count");
+    const size = $("#generation-size");
+    const variation = $("#generation-variation");
+    const referenceMode = $("#generation-reference-mode");
+    const poseOption = referenceMode?.querySelector("option[value='pose']");
+
+    if (!caps.bulk) {
+      if (restore.count == null) restore.count = count?.value || "1";
+      if (count) count.value = "1";
+    } else if (restore.count != null) {
+      if (count && [...count.options].some((item) => item.value === String(restore.count))) count.value = String(restore.count);
+      restore.count = null;
+    }
+    if (count) setGenerationCapabilityControl("#generation-count", caps.bulk, "このモデルは1枚生成のみ対応しています。");
+
+    if (supportedSizes.length && size) {
+      const previousSize = size.value || "";
+      if (!supportedSizes.includes(String(previousSize)) && restore.size == null) restore.size = previousSize;
+      const entries = typeof GenerationCapabilities !== "undefined"
+        ? GenerationCapabilities.sizeEntries(state.generation.options, generationProfile())
+        : [];
+      fillGenerationSelect("#generation-size", entries.length ? entries : supportedSizes);
+      const restoredSize = restore.size != null && supportedSizes.includes(String(restore.size)) ? String(restore.size) : "";
+      size.value = restoredSize || (supportedSizes.includes(previousSize) ? previousSize : supportedSizes[0]);
+      if (restoredSize) restore.size = null;
+    } else if (size && state.generation.options) {
+      fillGenerationSelect("#generation-size", state.generation.options.sizes || []);
+      if (restore.size != null && [...size.options].some((item) => item.value === String(restore.size))) size.value = String(restore.size);
+      restore.size = null;
+    }
+
+    if (!caps.variation) {
+      if (restore.variation == null) restore.variation = variation?.value || "off";
+      if (variation) variation.value = "off";
+    } else if (restore.variation != null) {
+      if (variation && [...variation.options].some((item) => item.value === String(restore.variation))) variation.value = String(restore.variation);
+      restore.variation = null;
+    }
+    if (variation) setGenerationCapabilityControl("#generation-variation", caps.variation && Number(count?.value || 1) > 1, "このモデルはVariationに対応していません。");
+
+    if (!caps.reference) {
+      if (restore.referenceMode == null) restore.referenceMode = referenceMode?.value || "none";
+      if (referenceMode) referenceMode.value = "none";
+    } else if (!caps.pose && referenceMode?.value === "pose") {
+      if (restore.referenceMode == null) restore.referenceMode = "pose";
+      referenceMode.value = "none";
+    } else if (restore.referenceMode != null) {
+      const canRestoreReferenceMode = restore.referenceMode !== "pose" || caps.pose;
+      if (canRestoreReferenceMode) {
+        if (referenceMode && [...referenceMode.options].some((item) => item.value === String(restore.referenceMode))) referenceMode.value = String(restore.referenceMode);
+        restore.referenceMode = null;
+      }
+    }
+    if (poseOption) poseOption.disabled = !caps.pose;
+    setGenerationCapabilityControl("#generation-reference-mode", caps.reference, "このモデルはReferenceに対応していません。");
+    setGenerationCapabilityControl("#generation-reference-file", caps.reference, "このモデルはReferenceに対応していません。");
+    setGenerationCapabilityControl("#generation-reference-strength", caps.reference, "このモデルはReferenceに対応していません。");
+    setGenerationCapabilityControl("#generation-reference-fit", caps.reference && caps.pose, "このモデルはPose/fitに対応していません。");
+    for (const type of ["character", "style", "additional"]) {
+      setGenerationCapabilityControl(`#generation-${type}-lora`, caps.lora, "このモデルはLoRAに対応していません。");
+      setGenerationCapabilityControl(`#generation-${type}-strength`, caps.lora, "このモデルはLoRAに対応していません。");
+    }
+    setGenerationCapabilityNotice("#generation-qwen-help", caps.lora && caps.reference && caps.bulk && caps.variation, "選択中のモデルでは一部機能が利用できません。選択値は保持されますが送信されません。");
+    setGenerationCapabilityNotice("#generation-bulk-help", caps.bulk, "選択中のモデルでは大量生成を利用できません。");
+    setGenerationCapabilityNotice("#generation-overnight-help", caps.overnight, "選択中のモデルでは夜間生成を利用できません。");
+    updateGenerationReferenceState();
+    updateGenerationVariationState();
+    updateGenerationAuthUi();
+    updateOvernightButtons(state.generation.overnight.lastOutput || {});
+    renderGenerationRequestSummary();
   }
 
   function generationLoraEntries(type) {
@@ -930,6 +1052,7 @@
     capability.classList.add("ready");
     updateGenerationAuthUi();
     restoreSavedGenerationSettings();
+    updateGenerationCapabilityUi();
     renderGenerationRequestSummary();
   }
 
@@ -1225,6 +1348,7 @@
   }
 
   function generationLoras() {
+    if (!generationCapabilities().lora) return [];
     const result = [];
     for (const type of ["character", "style", "additional"]) {
       const key = $(`#generation-${type}-lora`).value;
@@ -1454,6 +1578,7 @@
       }
 
       state.generation.restoreWarnings = warnings;
+      updateGenerationCapabilityUi();
       updateGenerationReferenceState();
       renderExplicitTagChips();
       renderGenerationRestoreStatus(warnings);
@@ -1519,7 +1644,10 @@
     const hint = $("#generation-reference-mode-hint");
     const help = $("#generation-reference-help");
     if (mode === "none") {
-      if ($("#generation-reference-file").value || state.generation.reference.fileName) clearGenerationReferenceSelection();
+      // When a model temporarily disables Reference, keep the selected asset
+      // so switching back restores the user's previous settings.  A manual
+      // "None" selection for a capable model still clears it as before.
+      if (generationCapabilities().reference && ($("#generation-reference-file").value || state.generation.reference.fileName)) clearGenerationReferenceSelection();
       if (hint) hint.textContent = "Referenceなし";
       if (help) help.textContent = "Composition または Pose を選ぶと画像を指定できます。";
     } else if (mode === "composition") {
@@ -1535,7 +1663,7 @@
 
   async function uploadGenerationReference() {
     const mode = generationReferenceMode();
-    if (mode === "none") return null;
+    if (mode === "none" || !generationCapabilities().reference || (mode === "pose" && !generationCapabilities().pose)) return null;
     if ((state.generation.reference.source === "gallery" || state.generation.reference.source === "restored") && state.generation.reference.imageId) {
       return state.generation.reference.imageId;
     }
@@ -1566,7 +1694,7 @@
     const rawSeed = $("#generation-seed").value.trim();
     const seed = rawSeed === "" ? -1 : Number(rawSeed);
     if (!Number.isInteger(seed) || seed < -1) throw new Error("Seedは-1または0以上の整数で指定してください。");
-    return {
+    const payload = {
       character_preset: $("#generation-character-preset").value || null,
       freeform_character: $("#generation-freeform-character").value.trim() || null,
       explicit_tags: generationTags($("#generation-explicit-tags").value),
@@ -1586,13 +1714,16 @@
       reference_strength: Number($("#generation-reference-strength").value),
       reference_fit: $("#generation-reference-fit").value || "contain",
     };
+    if (typeof GenerationCapabilities !== "undefined") return GenerationCapabilities.sanitizePayload(state.generation.options, payload);
+    return payload;
   }
 
   function updateGenerationVariationState() {
     const count = Number($("#generation-count").value || 1);
     const variation = $("#generation-variation");
-    variation.disabled = count <= 1;
-    if (count <= 1) variation.value = "off";
+    const supportsVariation = generationCapabilities().variation;
+    variation.disabled = !supportsVariation || count <= 1;
+    if (!supportsVariation || count <= 1) variation.value = "off";
     renderGenerationRequestSummary();
   }
 
@@ -1691,6 +1822,7 @@
       let payload;
       if (requestOverride && typeof requestOverride === "object") {
         payload = JSON.parse(JSON.stringify(requestOverride));
+        if (typeof GenerationCapabilities !== "undefined") payload = GenerationCapabilities.sanitizePayload(state.generation.options, payload);
         if (payload.reference_mode !== "none" && !payload.reference_image_id) {
           throw new Error("直前のReference画像が利用できないため、追加生成できません。Referenceを再指定してください。");
         }
@@ -1844,6 +1976,10 @@
 
   async function startBulkGeneration() {
     if (state.generation.bulk.submitting || state.generation.submitting) return;
+    if (!generationCapabilities().bulk) {
+      setGenerationStatus("選択中のモデルでは大量生成を利用できません。", true);
+      return;
+    }
     if (state.generation.auth.required && !state.generation.auth.authenticated) {
       setGenerationStatus("リモート生成キーで認証してください。", true);
       return;
@@ -2211,7 +2347,7 @@
     const pause = $("#generation-overnight-pause");
     const resume = $("#generation-overnight-resume");
     const stop = $("#generation-overnight-stop");
-    if (start) start.disabled = active || Boolean(state.generation.overnight.submitting) || Boolean(state.generation.submitting);
+    if (start) start.disabled = !generationCapabilities().overnight || active || Boolean(state.generation.overnight.submitting) || Boolean(state.generation.submitting);
     if (pause) pause.disabled = !active || stateValue === "stopping" || Boolean(state.generation.overnight.pausing);
     if (resume) resume.disabled = !["paused", "paused_error"].includes(stateValue) || Boolean(state.generation.overnight.resuming);
     if (stop) stop.disabled = !active || Boolean(state.generation.overnight.stopping);
@@ -2275,6 +2411,10 @@
 
   async function startOvernightGeneration() {
     if (state.generation.overnight.submitting || state.generation.submitting || state.generation.bulk.submitting) return;
+    if (!generationCapabilities().overnight) {
+      setGenerationStatus("選択中のモデルでは夜間生成を利用できません。", true);
+      return;
+    }
     if (state.generation.auth.required && !state.generation.auth.authenticated) {
       setGenerationStatus("リモート生成キーで認証してください。", true);
       return;
@@ -3430,6 +3570,10 @@
     $("#generation-overnight-stop").addEventListener("click", () => sendOvernightAction("stop"));
     $("#generation-auth-submit").addEventListener("click", unlockGeneration);
     $("#generation-auth-logout").addEventListener("click", logoutGeneration);
+    $("#generation-model").addEventListener("change", () => {
+      updateGenerationCapabilityUi();
+      scheduleGenerationSettingsSave();
+    });
     $("#generation-count").addEventListener("change", updateGenerationVariationState);
     $("#generation-reference-mode").addEventListener("change", updateGenerationReferenceState);
     $("#generation-reference-file").addEventListener("change", handleGenerationReferenceFileChange);
@@ -3470,6 +3614,7 @@
       input.addEventListener("change", scheduleGenerationSettingsSave);
     }
     $("#generation-reset").addEventListener("click", resetGenerationForm);
+    updateGenerationCapabilityUi();
     updateGenerationReferenceState();
     updateGenerationVariationState();
     renderExplicitTagChips();
