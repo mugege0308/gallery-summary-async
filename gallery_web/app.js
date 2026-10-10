@@ -23,6 +23,8 @@
     detailImageId: null,
     detailImage: null,
     detailSequence: [],
+    detailAdoptionPending: false,
+    detailAdoptionToken: 0,
     detailActualSeed: null,
     detailProvenanceToken: 0,
     comparison: new Map(),
@@ -2569,6 +2571,78 @@
     return state.pendingLora.has(image.id) ? state.pendingLora.get(image.id) : Boolean(image.lora_candidate);
   }
 
+  function updateDetailAdoptionUi() {
+    const button = $("#detail-toggle-adoption");
+    const status = $("#detail-adoption-status");
+    const image = state.detailImage;
+    if (!button || !status || !image) return;
+    const adopted = currentStatus(image) === "adopted";
+    button.textContent = adopted ? "採用済み ✓" : "採用する";
+    button.classList.toggle("adopted", adopted);
+    button.setAttribute("aria-pressed", adopted ? "true" : "false");
+    button.disabled = state.detailAdoptionPending;
+    status.textContent = state.detailAdoptionPending
+      ? "採用状態を更新中…"
+      : adopted ? "この画像は採用済みです。" : "この画像は未採用です。";
+  }
+
+  function updateAdoptionInMemory(imageId, status) {
+    const updateCollection = (collection) => {
+      for (const image of collection || []) {
+        if (String(image.id) !== String(imageId)) continue;
+        image.status = status;
+        if (status !== "adopted") image.lora_candidate = false;
+      }
+    };
+    updateCollection(state.images);
+    updateCollection(state.recentImages);
+    updateCollection(state.detailSequence);
+    if (state.detailImage && String(state.detailImage.id) === String(imageId)) {
+      state.detailImage.status = status;
+      if (status !== "adopted") state.detailImage.lora_candidate = false;
+    }
+    state.pending.delete(imageId);
+    state.pendingLora.delete(imageId);
+    const selection = state.selectionMeta.get(imageId);
+    if (selection) {
+      selection.status = status;
+      if (status !== "adopted") selection.lora_candidate = false;
+    }
+  }
+
+  async function toggleDetailAdoption() {
+    const image = state.detailImage;
+    if (!image || state.detailAdoptionPending) return;
+    const imageId = String(image.id);
+    const requestToken = ++state.detailAdoptionToken;
+    const previousStatus = currentStatus(image);
+    const nextStatus = previousStatus === "adopted" ? "unreviewed" : "adopted";
+    state.detailAdoptionPending = true;
+    updateDetailAdoptionUi();
+    try {
+      const response = await fetch("/api/commit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ updates: [{ id: imageId, status: nextStatus }] }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "採用状態を更新できません。");
+      updateAdoptionInMemory(imageId, nextStatus);
+      render();
+      if (state.detailImageId === imageId && requestToken === state.detailAdoptionToken) {
+        state.detailAdoptionPending = false;
+        updateDetailAdoptionUi();
+        setMessage(nextStatus === "adopted" ? "採用にしました。" : "採用を解除しました。");
+      }
+    } catch (error) {
+      if (requestToken === state.detailAdoptionToken) {
+        state.detailAdoptionPending = false;
+        updateDetailAdoptionUi();
+        setMessage(error.message || String(error), true);
+      }
+    }
+  }
+
   function formatAi(image) {
     if (!image.ai) return "AI未評価";
     const ai = image.ai;
@@ -3468,6 +3542,8 @@
   }
 
   function openDetail(image, preferredSequence = null) {
+    state.detailAdoptionToken += 1;
+    state.detailAdoptionPending = false;
     state.detailSequence = detailSequenceFor(image, preferredSequence);
     state.detailImageId = image.id;
     state.detailImage = image;
@@ -3500,6 +3576,7 @@
     setDetail("#detail-caption", metadata.caption);
     clearDetailActualSeed();
     updateDetailNavigation();
+    updateDetailAdoptionUi();
     updateDetailComparisonUi();
     const dialog = $("#detail-dialog");
     if (typeof dialog.showModal === "function") dialog.showModal(); else dialog.setAttribute("open", "");
@@ -3707,6 +3784,7 @@
     $("#close-detail").addEventListener("click", () => $("#detail-dialog").close());
     $("#detail-previous").addEventListener("click", () => navigateDetail(-1));
     $("#detail-next").addEventListener("click", () => navigateDetail(1));
+    $("#detail-toggle-adoption").addEventListener("click", toggleDetailAdoption);
     $("#detail-set-anchor").addEventListener("click", () => {
       const image = state.detailImage || state.images.find((item) => item.id === state.detailImageId);
       if (image) setRangeAnchor(image);
