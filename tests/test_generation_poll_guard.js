@@ -1,5 +1,6 @@
 const assert = require("assert");
 const guard = require("../gallery_web/generation_poll_guard.js");
+const progress = require("../gallery_web/generation_progress.js");
 
 function testNonActiveCompletionCannotWin() {
   const state = guard.create();
@@ -38,7 +39,7 @@ function testInvalidationIgnoresOldPoll() {
 
 function applyPollResult(state, ui, jobId, sequence, result) {
   if (!guard.isCurrent(state, jobId, sequence)) return;
-  ui.status = `${result.state} / job_id=${jobId}`;
+  ui.status = `${result.state}${progress.formatSingleProgress(result)} / job_id=${jobId}`;
   if (result.state === "completed") {
     ui.filter = jobId;
     ui.synced += 1;
@@ -65,7 +66,7 @@ function testUiEffectsAreScopedToActiveJob() {
   assert.strictEqual(ui.error, "");
 
   applyPollResult(state, ui, "job-b", newer.sequence, { state: "completed" });
-  assert.strictEqual(ui.status, "completed / job_id=job-b");
+  assert.strictEqual(ui.status, "completed / 100% / job_id=job-b");
   assert.strictEqual(ui.filter, "job-b");
   assert.strictEqual(ui.synced, 1);
   assert.strictEqual(ui.buttonEnabled, true);
@@ -78,9 +79,40 @@ function testSingleJobLifecycle() {
   for (const stage of ["queued", "resolving", "generating", "completed"]) {
     applyPollResult(state, ui, "job-a", active.sequence, { state: stage });
   }
-  assert.strictEqual(ui.status, "completed / job_id=job-a");
+  assert.strictEqual(ui.status, "completed / 100% / job_id=job-a");
   assert.strictEqual(ui.filter, "job-a");
   assert.strictEqual(ui.synced, 1);
+}
+
+function testCompletedResultWithStaleProgressIsComplete() {
+  const state = guard.create();
+  const ui = { status: "", filter: "", error: "", synced: 0, buttonEnabled: false };
+  const active = guard.activate(state, "job-result");
+  applyPollResult(state, ui, "job-result", active.sequence, {
+    state: "completed",
+    progress: 0.5,
+    output: { images: [{ filename: "result.png" }] },
+  });
+  assert.strictEqual(ui.status, "completed / 100% / job_id=job-result");
+  assert.strictEqual(ui.synced, 1);
+}
+
+function testSingleProgressTerminalStates() {
+  assert.strictEqual(progress.formatSingleProgress({ state: "generating", progress: 0.5 }), " / 50%");
+  assert.strictEqual(progress.formatSingleProgress({ state: "completed", progress: 0.5 }), " / 100%");
+  assert.strictEqual(progress.formatSingleProgress({ state: "completed", progress: 0 }), " / 100%");
+  assert.strictEqual(progress.formatSingleProgress({ state: "failed", progress: 0.5 }), "");
+  assert.strictEqual(progress.formatSingleProgress({ state: "cancelled", progress: 0.5 }), "");
+  assert.strictEqual(progress.formatSingleProgress({ state: "stopped", progress: 0.5 }), "");
+  assert.strictEqual(progress.isTerminalFailure({ state: "failed" }), true);
+  assert.strictEqual(progress.isTerminalFailure({ state: "cancelled" }), true);
+  assert.strictEqual(progress.isTerminalFailure({ state: "stopped" }), true);
+  assert.strictEqual(progress.isTerminalFailure({ state: "completed" }), false);
+  assert.strictEqual(progress.formatProgress({ state: "generating", total_count: 2, progress: 0.5 }), " / 50%");
+  assert.strictEqual(progress.formatProgress({ state: "completed", total_count: 2, progress: 0.5 }), " / 50%");
+  assert.strictEqual(progress.formatProgress({ state: "completed", progress: 0.5 }), " / 100%");
+  assert.strictEqual(progress.formatProgress({ state: "completed", interaction_id: "", progress: 0.5 }), " / 100%");
+  assert.strictEqual(progress.formatProgress({ state: "completed", interaction_id: "holding_hands", progress: 0.5 }), " / 100%");
 }
 
 testNonActiveCompletionCannotWin();
@@ -89,4 +121,6 @@ testActiveCompletionAndFailureRemainCurrent();
 testInvalidationIgnoresOldPoll();
 testUiEffectsAreScopedToActiveJob();
 testSingleJobLifecycle();
+testCompletedResultWithStaleProgressIsComplete();
+testSingleProgressTerminalStates();
 console.log("generation poll guard tests: OK");

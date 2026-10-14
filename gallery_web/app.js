@@ -296,7 +296,7 @@
     const total = Number(data?.total_count ?? output.total_count ?? request.count ?? output.image_count ?? 1);
     const completed = Number(data?.completed_count ?? output.completed_count ?? output.image_count ?? 0);
     const failed = Number(data?.failed_count ?? output.failed_count ?? 0);
-    const stateLabel = data?.state === "failed" ? "Failed" : "Completed";
+    const stateLabel = data?.state === "completed" ? "Completed" : "Failed";
     const progressLabel = total > 1 ? `${stateLabel} ${completed} / ${total}${failed ? ` / Failed ${failed}` : ""}` : stateLabel;
     const actualSeeds = Array.isArray(output.actual_seeds)
       ? output.actual_seeds
@@ -1831,12 +1831,12 @@
       const data = await response.json();
       if (!isCurrentGeneration(jobId, sequence)) return;
       if (!response.ok || data.ok === false) throw new Error(data.error || "生成状態を取得できません。");
-      const progress = data.progress == null ? "" : ` / ${Math.round(Number(data.progress) * 100)}%`;
+      const progress = GenerationProgress.formatProgress(data);
       const stage = data.stage ? ` / ${data.stage}` : "";
       const counts = data.total_count > 1
         ? ` / ${data.completed_count || 0}/${data.total_count}完了${data.failed_count ? ` / 失敗${data.failed_count}` : ""}`
         : "";
-      const stateLabel = { queued: "Queued", resolving: "Resolving", generating: "Generating", completed: "Completed", failed: "Failed" }[data.state] || data.state || "Unknown";
+      const stateLabel = { queued: "Queued", resolving: "Resolving", generating: "Generating", completed: "Completed", failed: "Failed", cancelled: "Cancelled", stopped: "Stopped" }[data.state] || data.state || "Unknown";
       const visibleCounts = data.total_count > 1 ? ` ${data.completed_count || 0} / ${data.total_count}` : "";
       setGenerationStatus(`${stateLabel}${visibleCounts}${progress}${stage}${counts} / job_id=${jobId}`);
       state.generation.lastOutput = data;
@@ -1857,13 +1857,13 @@
         });
         return;
       }
-      if (data.state === "failed") {
+      if (GenerationProgress.isTerminalFailure(data)) {
         stopGenerationPolling();
         state.generation.submitting = false;
         $("#generation-submit").disabled = false;
         updateGenerationAuthUi();
         renderGenerationResultSummary(data, jobId);
-        setGenerationStatus(`${data.state} / ${data.error_summary || "生成に失敗しました。"} / job_id=${jobId}`, true);
+        setGenerationStatus(`${stateLabel} / ${data.error_summary || "生成に失敗しました。"} / job_id=${jobId}`, true);
         return;
       }
       state.generation.pollTimer = setTimeout(() => pollGenerationJob(jobId, sequence), 1500);
