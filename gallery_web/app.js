@@ -33,6 +33,7 @@
     aiJob: null,
     generation: {
       options: null,
+      interactionProfiles: [],
       jobId: "",
       pollTimer: null,
       submitting: false,
@@ -111,6 +112,7 @@
     "#generation-rating",
     "#generation-size",
     "#generation-multi-person-framing",
+    "#generation-interaction",
     "#generation-seed",
     "#generation-character-lora",
     "#generation-character-strength",
@@ -148,6 +150,7 @@
       rating: $("#generation-rating")?.value || "",
       size: $("#generation-size")?.value || "",
       multi_person_framing: $("#generation-multi-person-framing")?.value || "auto",
+      interaction_id: $("#generation-interaction")?.value || "",
       loras,
       count: $("#generation-count")?.value || "1",
       variation: $("#generation-variation")?.value || "off",
@@ -208,6 +211,13 @@
     return select.selectedOptions?.[0]?.textContent?.trim() || select.value || "";
   }
 
+  function generationInteractionLabel(interactionId) {
+    const id = String(interactionId || "").trim();
+    if (!id) return "";
+    const profile = state.generation.interactionProfiles.find((item) => item.id === id);
+    return profile?.display_name || id;
+  }
+
   function generationSummaryLoras(loras = null) {
     if (!generationCapabilities().lora) return [];
     const values = loras || ["character", "style", "additional"].flatMap((type) => {
@@ -263,6 +273,7 @@
       ["Rating", generationOptionLabel("#generation-rating")],
       ["Count / Variation", `${count} / ${variation}`],
       ["Multi-person framing", generationOptionLabel("#generation-multi-person-framing")],
+      ["Interaction", generationInteractionLabel($("#generation-interaction")?.value)],
       ["LoRA", loras.join(", ")],
       ["Reference", reference],
     ];
@@ -312,6 +323,7 @@
       ["actual seed", seeds.join(", ")],
       ["Model", request.model_key || ""],
       ["Rating", request.rating || ""],
+      ["Interaction", generationInteractionLabel(request.interaction_id)],
       ["LoRA", loras.join(", ")],
       ["Reference", reference],
       ["Count / Variation", `${request.count || total} / ${request.variation || "off"}`],
@@ -1031,6 +1043,62 @@
     if (entry && entry.default_strength != null) input.value = entry.default_strength;
   }
 
+  function restoreSavedInteractionSelection() {
+    const select = $("#generation-interaction");
+    if (!select || typeof GenerationSettings === "undefined") return;
+    const saved = GenerationSettings.read(generationSettingsStorage());
+    const savedId = String(saved?.interaction_id || "").trim();
+    select.value = savedId && [...select.options].some((item) => item.value === savedId) ? savedId : "";
+  }
+
+  function renderInteractionProfiles(profiles) {
+    const select = $("#generation-interaction");
+    const help = $("#generation-interaction-help");
+    if (!select) return;
+    const safeProfiles = (Array.isArray(profiles) ? profiles : [])
+      .filter((item) => item && typeof item === "object")
+      .map((item) => ({
+        id: String(item.id || "").trim(),
+        display_name: String(item.display_name || "").trim(),
+        mode: String(item.mode || "").trim(),
+        classification: String(item.classification || "").trim(),
+      }))
+      .filter((item) => item.id && item.display_name);
+    state.generation.interactionProfiles = safeProfiles;
+    select.replaceChildren();
+    addSelectOption(select, "", "None");
+    for (const profile of safeProfiles) addSelectOption(select, profile.id, profile.display_name);
+    select.disabled = safeProfiles.length === 0;
+    if (help) help.textContent = safeProfiles.length
+      ? "Backendで公開中のinteractionから選択できます。"
+      : "Interactionを利用できません。通常生成はそのまま使えます。";
+    restoreSavedInteractionSelection();
+    renderGenerationRequestSummary();
+  }
+
+  async function loadInteractionProfiles() {
+    const select = $("#generation-interaction");
+    const help = $("#generation-interaction-help");
+    if (!select) return false;
+    select.disabled = true;
+    try {
+      const response = await fetch("/api/generation/interaction-profiles?released=production_candidate", { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok || !Array.isArray(data)) throw new Error("Interaction一覧を取得できません。");
+      renderInteractionProfiles(data);
+      return true;
+    } catch (_error) {
+      state.generation.interactionProfiles = [];
+      select.replaceChildren();
+      addSelectOption(select, "", "None");
+      select.value = "";
+      select.disabled = true;
+      if (help) help.textContent = "Interaction一覧を取得できません。通常生成はそのまま使えます。";
+      renderGenerationRequestSummary();
+      return false;
+    }
+  }
+
   function renderGenerationOptions(data) {
     state.generation.options = data || {};
     fillGenerationSelect("#generation-character-preset", data.character_presets, "なし");
@@ -1470,6 +1538,7 @@
     if (saved.rating) restoreGenerationSelect("#generation-rating", saved.rating, "Rating", warnings);
     if (saved.size) restoreGenerationSelect("#generation-size", saved.size, "Size", warnings);
     restoreGenerationSelect("#generation-multi-person-framing", saved.multi_person_framing || "auto", "Multi-person framing", warnings);
+    restoreSavedInteractionSelection();
     restoreGenerationLoras(saved.loras, warnings);
 
     $("#generation-count").value = saved.count;
@@ -1502,6 +1571,7 @@
     $("#generation-appearance").value = "";
     $("#generation-request").value = "";
     $("#generation-multi-person-framing").value = "auto";
+    $("#generation-interaction").value = "";
     $("#generation-seed").value = $("#generation-seed").defaultValue || "-1";
     $("#generation-count").value = $("#generation-count").querySelector("option")?.value || "1";
     $("#generation-variation").value = $("#generation-variation").defaultValue || "off";
@@ -1716,6 +1786,8 @@
       reference_strength: Number($("#generation-reference-strength").value),
       reference_fit: $("#generation-reference-fit").value || "contain",
     };
+    const interactionId = $("#generation-interaction")?.value || "";
+    if (interactionId) payload.interaction_id = interactionId;
     if (typeof GenerationCapabilities !== "undefined") return GenerationCapabilities.sanitizePayload(state.generation.options, payload);
     return payload;
   }
@@ -3817,6 +3889,7 @@
     $("#job-filter").value = initialJobId;
     setView("gallery");
     loadGenerationOptions();
+    loadInteractionProfiles();
     load();
     loadAiStatus();
   });

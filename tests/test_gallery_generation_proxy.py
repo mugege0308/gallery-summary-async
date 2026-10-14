@@ -48,6 +48,16 @@ class FakeGenerationBackendHandler(BaseHTTPRequestHandler):
             return self._json({"bulk_id": "bulk-1", "state": "completed", "requested_total": 16, "completed_count": 16, "failed_count": 0})
         if self.path == "/api/generation/health":
             return self._json({"service_ready": True})
+        if urlsplit(self.path).path == "/api/generation/interaction-profiles":
+            return self._json(
+                [
+                    {"id": "holding_hands", "display_name": "Holding hands", "mode": "prompt_only", "classification": "production_candidate"},
+                    {"id": "dancing_together", "display_name": "Dancing together", "mode": "prompt_only", "classification": "production_candidate"},
+                    {"id": "hand_on_shoulder", "display_name": "Hand on shoulder", "mode": "prompt_only", "classification": "production_candidate"},
+                    {"id": "arm_around_shoulder", "display_name": "Arm around shoulder", "mode": "prompt_only", "classification": "production_candidate"},
+                    {"id": "leaning_on_partner", "display_name": "Leaning on partner", "mode": "prompt_only", "classification": "production_candidate"},
+                ]
+            )
         if urlsplit(self.path).path == "/api/generation/tags/search":
             query = parse_qs(urlsplit(self.path).query)
             FakeGenerationBackendHandler.last_tag_search_query = query
@@ -157,6 +167,13 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(value["models"][0]["key"], "animagine")
 
+    def test_interaction_profiles_proxy_forwards_public_catalog_only(self) -> None:
+        status, value = self.request("GET", "/api/generation/interaction-profiles?released=production_candidate")
+        self.assertEqual(status, 200)
+        self.assertEqual(5, len(value))
+        self.assertEqual("holding_hands", value[0]["id"])
+        self.assertNotIn("prompt_additions", json.dumps(value))
+
     def test_tag_search_proxy_forwards_only_safe_query(self) -> None:
         status, value = self.request("GET", "/api/generation/tags/search?q=smile&limit=20")
         self.assertEqual(status, 200)
@@ -177,7 +194,13 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn("category", value["error"])
 
     def test_localhost_post_forwards_safe_json_and_returns_job(self) -> None:
-        payload = {"model_key": "animagine", "count": 1, "loras": [], "multi_person_framing": "both_faces"}
+        payload = {
+            "model_key": "animagine",
+            "count": 1,
+            "loras": [],
+            "multi_person_framing": "both_faces",
+            "interaction_id": "holding_hands",
+        }
         status, value = self.request("POST", "/api/generation/jobs", payload)
         self.assertEqual(status, 202)
         self.assertEqual(value["job_id"], "job-1")
@@ -185,7 +208,12 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertNotIn(r"C:\private", json.dumps(value))
 
     def test_localhost_bulk_post_and_poll_are_forwarded(self) -> None:
-        payload = {"total_count": 16, "selection_mode": "best4", "count": 1}
+        payload = {
+            "total_count": 16,
+            "selection_mode": "best4",
+            "count": 1,
+            "interaction_id": "holding_hands",
+        }
         status, value = self.request("POST", "/api/generation/bulk-jobs", payload)
         self.assertEqual(status, 202)
         self.assertEqual(value["job_id"], "job-1")
@@ -734,6 +762,8 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn('<option value="8">8</option>', html)
         self.assertIn('id="generation-variation"', html)
         self.assertIn('id="generation-multi-person-framing"', html)
+        self.assertIn('id="generation-interaction"', html)
+        self.assertIn('id="generation-interaction-help"', html)
         self.assertIn('id="generation-reference-mode"', html)
         self.assertIn('id="generation-reference-file"', html)
         self.assertIn('id="generation-reference-help"', html)
@@ -786,6 +816,11 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertIn('id="generation-auth-token"', html)
         self.assertIn('id="generation-auth-submit"', html)
         self.assertIn('/api/generation/jobs', app)
+        self.assertIn('/api/generation/interaction-profiles?released=production_candidate', app)
+        self.assertIn('loadInteractionProfiles', app)
+        self.assertIn('renderInteractionProfiles', app)
+        self.assertIn('if (interactionId) payload.interaction_id = interactionId;', app)
+        self.assertIn('select.disabled = true', app)
         self.assertIn('/api/generation/references', app)
         self.assertIn('/api/generation/references/from-gallery', app)
         self.assertIn('/api/generation/tags/search', app)

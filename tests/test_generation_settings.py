@@ -15,6 +15,7 @@ class GenerationSettingsIntegrationTests(unittest.TestCase):
         self.assertIn('id="generation-reset"', html)
         self.assertIn('id="generation-explicit-tags-chips"', html)
         self.assertIn('id="generation-explicit-tags-clear"', html)
+        self.assertIn('id="generation-interaction"', html)
         self.assertIn('src="/static/generation_tags.js"', html)
         self.assertIn("前回の入力設定を自動保存します", html)
         self.assertIn('"gallery.generate.settings.v1"', helper)
@@ -22,6 +23,8 @@ class GenerationSettingsIntegrationTests(unittest.TestCase):
         self.assertIn("GenerationSettings.read", app)
         self.assertIn("GenerationSettings.clear", app)
         self.assertIn("restoreSavedGenerationSettings", app)
+        self.assertIn("loadInteractionProfiles", app)
+        self.assertIn("interaction_id", app)
         self.assertIn('$("#generation-reset").addEventListener', app)
 
     def test_explicit_tags_chips_use_textarea_as_source_of_truth(self) -> None:
@@ -56,6 +59,7 @@ class GenerationSettingsIntegrationTests(unittest.TestCase):
             "generation-rating",
             "generation-size",
             "generation-multi-person-framing",
+            "generation-interaction",
             "generation-seed",
             "generation-character-lora",
             "generation-character-strength",

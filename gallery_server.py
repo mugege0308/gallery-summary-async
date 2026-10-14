@@ -623,6 +623,8 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
         method: str,
         path: str,
         payload: dict[str, Any] | None = None,
+        *,
+        allow_list: bool = False,
     ) -> None:
         url = f"{self._generation_backend_url()}{path}"
         data = None
@@ -652,7 +654,7 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
             value = json.loads(raw.decode("utf-8"))
         except (UnicodeError, json.JSONDecodeError) as error:
             return self._send_error_json("Generation Backendの応答を読み取れません。", HTTPStatus.BAD_GATEWAY)
-        if not isinstance(value, dict):
+        if not isinstance(value, dict) and not (allow_list and isinstance(value, list)):
             return self._send_error_json("Generation Backendの応答が不正です。", HTTPStatus.BAD_GATEWAY)
         return self._send_json(_sanitize_proxy_value(value), status)
 
@@ -800,6 +802,20 @@ class GalleryRequestHandler(BaseHTTPRequestHandler):
                 return self._proxy_generation_json("GET", path)
             if path == "/api/generation/options":
                 return self._proxy_generation_json("GET", path)
+            if path == "/api/generation/interaction-profiles":
+                query = parse_qs(parsed.query, keep_blank_values=True)
+                unknown = set(query) - {"released"}
+                if unknown:
+                    return self._send_error_json("Interaction profileの指定が不正です。", HTTPStatus.BAD_REQUEST)
+                released = query.get("released", ["production_candidate"])[-1]
+                if released != "production_candidate":
+                    return self._send_error_json("Interaction profileのreleased指定が不正です。", HTTPStatus.BAD_REQUEST)
+                safe_query = urlencode({"released": released})
+                return self._proxy_generation_json(
+                    "GET",
+                    f"{path}?{safe_query}",
+                    allow_list=True,
+                )
             if path == "/api/generation/tags/search":
                 query = parse_qs(parsed.query, keep_blank_values=True)
                 unknown = set(query) - {"q", "limit", "category"}

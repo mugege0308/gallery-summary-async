@@ -19,6 +19,7 @@
       rating: "",
       size: "",
       multi_person_framing: "auto",
+      interaction_id: "",
       loras: {
         character: { key: "", strength: "0.5" },
         style: { key: "", strength: "0.5" },
@@ -47,6 +48,7 @@
       "rating",
       "size",
       "multi_person_framing",
+      "interaction_id",
       "count",
       "variation",
       "seed",
@@ -85,6 +87,7 @@
       rating: normalized.rating,
       size: normalized.size,
       multi_person_framing: normalized.multi_person_framing,
+      interaction_id: normalized.interaction_id,
       loras: normalized.loras,
       count: normalized.count,
       variation: normalized.variation,

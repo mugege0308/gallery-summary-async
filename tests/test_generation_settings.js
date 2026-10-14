@@ -20,6 +20,7 @@ function testRoundTripStoresOnlyFormSettings() {
     rating: "safe",
     size: "square",
     multi_person_framing: "full_body",
+    interaction_id: "holding_hands",
     loras: {
       character: { key: "", strength: "0.5" },
       style: { key: "matuTake_style_v1", strength: "0.5" },
@@ -38,6 +39,7 @@ function testRoundTripStoresOnlyFormSettings() {
   assert.ok(!raw.includes("raw-token-must-not-persist"));
   assert.deepStrictEqual(settings.read(storage), settings.capture(values));
   assert.strictEqual(settings.read(storage).multi_person_framing, "full_body");
+  assert.strictEqual(settings.read(storage).interaction_id, "holding_hands");
 }
 
 function testNormalizationAndSeedPreservation() {

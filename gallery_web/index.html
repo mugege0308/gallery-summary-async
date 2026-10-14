@@ -224,6 +224,12 @@
           </select>
           <small class="generation-field-help">複数人のときだけ適用。1人の入力では無視されます。</small>
         </label>
+        <label>Interaction
+          <select id="generation-interaction" disabled>
+            <option value="">None</option>
+          </select>
+          <small id="generation-interaction-help" class="generation-field-help">Backendから利用可能なinteractionを取得中…</small>
+        </label>
         <label>Seed（空欄は自動）
           <input id="generation-seed" type="number" step="1" value="-1">
         </label>
