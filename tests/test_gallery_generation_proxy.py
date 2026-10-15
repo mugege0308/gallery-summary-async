@@ -56,6 +56,7 @@ class FakeGenerationBackendHandler(BaseHTTPRequestHandler):
                     {"id": "hand_on_shoulder", "display_name": "Hand on shoulder", "mode": "prompt_only", "classification": "production_candidate"},
                     {"id": "arm_around_shoulder", "display_name": "Arm around shoulder", "mode": "prompt_only", "classification": "production_candidate"},
                     {"id": "leaning_on_partner", "display_name": "Leaning on partner", "mode": "prompt_only", "classification": "production_candidate"},
+                    {"id": "hugging", "display_name": "Hugging", "mode": "ipadapter_profile", "classification": "production_candidate"},
                 ]
             )
         if urlsplit(self.path).path == "/api/generation/tags/search":
@@ -170,8 +171,9 @@ class GalleryGenerationProxyTests(unittest.TestCase):
     def test_interaction_profiles_proxy_forwards_public_catalog_only(self) -> None:
         status, value = self.request("GET", "/api/generation/interaction-profiles?released=production_candidate")
         self.assertEqual(status, 200)
-        self.assertEqual(5, len(value))
+        self.assertEqual(6, len(value))
         self.assertEqual("holding_hands", value[0]["id"])
+        self.assertEqual("hugging", value[-1]["id"])
         self.assertNotIn("prompt_additions", json.dumps(value))
 
     def test_tag_search_proxy_forwards_only_safe_query(self) -> None:
@@ -206,6 +208,18 @@ class GalleryGenerationProxyTests(unittest.TestCase):
         self.assertEqual(value["job_id"], "job-1")
         self.assertEqual(FakeGenerationBackendHandler.last_payload, payload)
         self.assertNotIn(r"C:\private", json.dumps(value))
+
+    def test_localhost_post_forwards_hugging_id_without_gallery_side_configuration(self) -> None:
+        payload = {
+            "model_key": "animagine",
+            "count": 1,
+            "loras": [],
+            "interaction_id": "hugging",
+        }
+        status, value = self.request("POST", "/api/generation/jobs", payload)
+        self.assertEqual(status, 202)
+        self.assertEqual(value["job_id"], "job-1")
+        self.assertEqual(FakeGenerationBackendHandler.last_payload, payload)
 
     def test_localhost_bulk_post_and_poll_are_forwarded(self) -> None:
         payload = {

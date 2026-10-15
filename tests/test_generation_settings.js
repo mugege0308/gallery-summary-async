@@ -42,6 +42,13 @@ function testRoundTripStoresOnlyFormSettings() {
   assert.strictEqual(settings.read(storage).interaction_id, "holding_hands");
 }
 
+function testHuggingSelectionRoundTrip() {
+  const storage = new MemoryStorage();
+  const values = { interaction_id: "hugging" };
+  assert.strictEqual(settings.write(storage, values), true);
+  assert.strictEqual(settings.read(storage).interaction_id, "hugging");
+}
+
 function testNormalizationAndSeedPreservation() {
   const normalized = settings.normalize({ count: "1", variation: "auto", seed: "-1" });
   assert.strictEqual(normalized.count, "1");
@@ -85,6 +92,7 @@ function testClear() {
 }
 
 testRoundTripStoresOnlyFormSettings();
+testHuggingSelectionRoundTrip();
 testNormalizationAndSeedPreservation();
 testInvalidSavedValuesFallBackSafely();
 testUnavailableStorageIsNonFatal();
